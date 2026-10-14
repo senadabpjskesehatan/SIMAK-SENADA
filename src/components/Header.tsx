@@ -34,7 +34,7 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({ onOpenLoginModal }) => {
   const {
     currentUser,
-    switchRole,
+    logout,
     users,
     activeTab,
     setActiveTab,
@@ -44,6 +44,8 @@ export const Header: React.FC<HeaderProps> = ({ onOpenLoginModal }) => {
 
   const [roleDropdownOpen, setRoleDropdownOpen] = useState(false);
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
+
+  if (!currentUser) return null;
 
   const getRoleBadge = (role: UserRole) => {
     switch (role) {
@@ -130,7 +132,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenLoginModal }) => {
   return (
     <header className="sticky top-0 z-30 bg-white border-b border-slate-200 shadow-xs">
       {/* Top Banner Bar */}
-      <div className="bg-slate-900 text-slate-300 text-xs px-4 py-1.5 flex items-center justify-between">
+      <div className="bg-slate-900 text-slate-300 text-xs px-4 py-2 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
           <span className="font-medium text-slate-200">SENADA BPJS Kesehatan</span>
@@ -138,61 +140,8 @@ export const Header: React.FC<HeaderProps> = ({ onOpenLoginModal }) => {
           <span>Sistem Penjaminan Mutu Jawaban Petugas Berbasis AI & Regulasi SOP</span>
         </div>
 
-        <div className="flex items-center gap-3">
-          <span className="hidden sm:inline text-slate-400">Ganti Akun Role Cepat:</span>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => switchRole('admin')}
-              className={`px-2 py-0.5 rounded text-[11px] font-medium transition ${
-                currentUser.role === 'admin'
-                  ? 'bg-rose-500 text-white'
-                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-              }`}
-            >
-              Admin
-            </button>
-
-            <button
-              onClick={() => switchRole('qa')}
-              className={`px-2 py-0.5 rounded text-[11px] font-medium transition ${
-                currentUser.role === 'qa'
-                  ? 'bg-teal-500 text-white'
-                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-              }`}
-            >
-              QA Mutu
-            </button>
-            <button
-              onClick={() => switchRole('pusat')}
-              className={`px-2 py-0.5 rounded text-[11px] font-medium transition ${
-                currentUser.role === 'pusat'
-                  ? 'bg-purple-500 text-white'
-                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-              }`}
-            >
-              Pusat
-            </button>
-            <button
-              onClick={() => switchRole('team_leader')}
-              className={`px-2 py-0.5 rounded text-[11px] font-medium transition ${
-                currentUser.role === 'team_leader'
-                  ? 'bg-amber-500 text-white'
-                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-              }`}
-            >
-              Team Leader
-            </button>
-            <button
-              onClick={() => switchRole('petugas')}
-              className={`px-2 py-0.5 rounded text-[11px] font-medium transition ${
-                currentUser.role === 'petugas'
-                  ? 'bg-blue-500 text-white'
-                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-              }`}
-            >
-              Petugas
-            </button>
-          </div>
+        <div className="flex items-center gap-3 text-[11px] text-slate-400">
+          <span className="hidden sm:inline">Portal Penjaminan Mutu Terintegrasi</span>
         </div>
       </div>
 
@@ -286,9 +235,9 @@ export const Header: React.FC<HeaderProps> = ({ onOpenLoginModal }) => {
                     <button
                       onClick={() => {
                         setRoleDropdownOpen(false);
-                        onOpenLoginModal();
+                        logout();
                       }}
-                      className="w-full text-left px-3 py-2 text-xs text-rose-600 hover:text-rose-800 hover:bg-rose-50 rounded-lg flex items-center gap-2.5 transition font-medium mt-0.5"
+                      className="w-full text-left px-3 py-2 text-xs text-rose-600 hover:text-rose-800 hover:bg-rose-50 rounded-lg flex items-center gap-2.5 transition font-medium mt-0.5 cursor-pointer"
                     >
                       <LogOut className="w-4 h-4 text-rose-500 shrink-0" />
                       <div>

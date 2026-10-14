@@ -114,8 +114,10 @@ const batchDeleteDocs = async (docRefs: any[]) => {
 
 
 interface AppContextType {
-  currentUser: User;
-  setCurrentUser: (user: User) => void;
+  currentUser: User | null;
+  setCurrentUser: (user: User | null) => void;
+  login: (usernameOrNip: string, password: string) => { success: boolean; message?: string };
+  logout: () => void;
   switchRole: (role: User['role']) => void;
   users: User[];
   addUser: (user: Omit<User, 'id'>) => void;
@@ -266,8 +268,8 @@ const safeStorage = {
 });
 
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  // 1. Current User (Default to Administrator Senada so all menus including Manajemen User are immediately accessible)
-  const [currentUser, setCurrentUser] = useState<User>(() => {
+  // 1. Current User (Defaults to null when not logged in, requiring login at Halaman Awal Login)
+  const [currentUser, setCurrentUser] = useState<User | null>(() => {
     const saved = safeStorage.getItem(STORAGE_KEYS.USER);
     if (saved) {
       try {
@@ -277,8 +279,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         console.error(e);
       }
     }
-    // Default to Administrator Senada (Admin role)
-    return INITIAL_USERS[0];
+    return null;
   });
 
   // 2. Users list synced with Firestore
@@ -438,7 +439,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // Sync to LocalStorage with safeStorage
   useEffect(() => {
-    safeStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(currentUser));
+    if (currentUser) {
+      safeStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(currentUser));
+    } else {
+      safeStorage.removeItem(STORAGE_KEYS.USER);
+    }
   }, [currentUser]);
 
   useEffect(() => {
@@ -486,7 +491,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     try {
       await safeSetDoc(doc(db, 'users', id), updated, { merge: true });
       const target = users.find((u) => u.id === id);
-      if (target && currentUser.id === id) {
+      if (target && currentUser?.id === id) {
         setCurrentUser({ ...target, ...updated });
       }
     } catch (e) {
@@ -495,7 +500,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const deleteUser = async (id: string) => {
-    if (id === currentUser.id) {
+    if (currentUser && id === currentUser.id) {
       alert('Tidak dapat menghapus akun yang sedang aktif digunakan.');
       return;
     }
@@ -648,7 +653,52 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     bulkUsersCreate(newUsers);
   };
 
+  const login = (usernameInput: string, passwordInput: string): { success: boolean; message?: string } => {
+    const trimmedUser = usernameInput.trim().toLowerCase();
+    const trimmedPass = passwordInput.trim();
+
+    if (!trimmedUser || !trimmedPass) {
+      return { success: false, message: 'Harap masukkan username atau NIP dan kata sandi.' };
+    }
+
+    const userList = users.length > 0 ? users : INITIAL_USERS;
+    const found = userList.find(
+      (u) =>
+        u.username.toLowerCase() === trimmedUser ||
+        (u.nip && u.nip.toLowerCase() === trimmedUser) ||
+        (u.email && u.email.toLowerCase() === trimmedUser)
+    );
+
+    if (found) {
+      const expectedPass = found.password || (found.role === 'admin' || found.role === 'pusat' ? '150bisa' : 'kualitas99');
+      if (expectedPass !== trimmedPass) {
+        return { success: false, message: 'Username atau kata sandi tidak sesuai. Silakan periksa kembali.' };
+      }
+      setCurrentUser(found);
+      setActiveTab('dashboard');
+      return { success: true };
+    }
+
+    if (trimmedUser === 'senada' && trimmedPass === '150bisa') {
+      const adminUser: User = INITIAL_USERS[0];
+      setCurrentUser(adminUser);
+      setActiveTab('dashboard');
+      return { success: true };
+    }
+
+    return { success: false, message: 'Username atau kata sandi tidak sesuai. Silakan periksa kembali.' };
+  };
+
+  const logout = () => {
+    setCurrentUser(null);
+    safeStorage.removeItem(STORAGE_KEYS.USER);
+    setActiveTab('dashboard');
+  };
+
   const changePassword = (oldPass: string, newPass: string): { success: boolean; message: string } => {
+    if (!currentUser) {
+      return { success: false, message: 'Sesi Anda telah berakhir. Silakan login kembali.' };
+    }
     const expectedPass = currentUser.password || (currentUser.role === 'admin' || currentUser.role === 'pusat' ? '150bisa' : 'kualitas99');
     if (oldPass !== expectedPass) {
       return { success: false, message: 'Password lama yang Anda masukkan tidak sesuai.' };
@@ -1059,8 +1109,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       id: samplingId,
       nomorTiket: ticket.nomorTiket,
       ticket: { ...ticket, sampled: true, samplingId },
-      qaId: currentUser.id,
-      qaName: currentUser.name,
+      qaId: currentUser?.id || '',
+      qaName: currentUser?.name || '',
       petugasTeam,
       tanggalSampling: nowStr.slice(0, 10),
       scores,
@@ -1074,7 +1124,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       history: [
         {
           timestamp: nowStr,
-          actor: currentUser.name,
+          actor: currentUser?.name || '',
           role: 'Quality Assurance',
           action: 'Sampling jawaban dan penilaian awal',
           note: `Nilai Awal QA: ${nilaiAwal}. Hasil diteruskan ke Petugas (${ticket.namaPetugas}) dan Team Leader (${petugasTeam}).`,
@@ -1111,7 +1161,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
               ...item.history,
               {
                 timestamp: nowStr,
-                actor: currentUser.name,
+                actor: currentUser?.name || '',
                 role: 'Petugas' as const,
                 action: 'Menerima dan menyetujui hasil sampling',
                 note: `Petugas menyetujui nilai akhir ${item.nilaiFinal} tanpa sanggahan. Tercatat ke Team Leader (${item.petugasTeam || 'TIM'}).`,
@@ -1140,7 +1190,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
               ...item.history,
               {
                 timestamp: nowStr,
-                actor: currentUser.name,
+                actor: currentUser?.name || '',
                 role: 'Petugas' as const,
                 action: 'Mengajukan sanggahan penilaian mutu',
                 note: `Alasan: "${sanggahan.alasanSanggahan}". Usulan nilai: ${sanggahan.usulanNilai || '-'}. Diteruskan kembali ke QA Penilai (${item.qaName}).`,
@@ -1171,7 +1221,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
               ...item.history,
               {
                 timestamp: nowStr,
-                actor: currentUser.name,
+                actor: currentUser?.name || '',
                 role: 'Quality Assurance' as const,
                 action: `Keputusan akhir sanggahan: ${keputusan.statusPutusan.replace('_', ' ')}`,
                 note: `Nilai akhir resmi: ${keputusan.nilaiAkhir}. Catatan QA: "${keputusan.catatanPutusanQA}". Nilai masuk ke Petugas (${item.ticket.namaPetugas}) dan Team Leader (${item.petugasTeam || 'TIM'}).`,
@@ -1226,9 +1276,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       qaName: samplingEvaluation.qaName,
       nilaiSamplingQA: nilaiQA,
       scoresQA: samplingEvaluation.scores,
-      calibratorId: currentUser.id,
-      calibratorName: currentUser.name,
-      calibratorRole: currentUser.role as 'admin' | 'pusat',
+      calibratorId: currentUser?.id || '',
+      calibratorName: currentUser?.name || '',
+      calibratorRole: (currentUser?.role as 'admin' | 'pusat') || 'admin',
       tanggalKalibrasi: nowStr,
       scoresKalibrasi: scores,
       nilaiKalibrasi,
@@ -1242,9 +1292,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       isCalibrated: true,
       calibrationId: calId,
       calibratedBy: {
-        id: currentUser.id,
-        name: currentUser.name,
-        role: currentUser.role as 'admin' | 'pusat',
+        id: currentUser?.id || '',
+        name: currentUser?.name || '',
+        role: (currentUser?.role as 'admin' | 'pusat') || 'admin',
         tanggal: nowStr,
         nilaiKalibrasi,
         kesesuaian: persentase,
@@ -1253,8 +1303,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         ...samplingEvaluation.history,
         {
           timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19),
-          actor: currentUser.name,
-          role: currentUser.role === 'admin' ? ('Administrator' as const) : ('Pimpinan Pusat' as const),
+          actor: currentUser?.name || '',
+          role: currentUser?.role === 'admin' ? ('Administrator' as const) : ('Pimpinan Pusat' as const),
           action: 'Melakukan uji sampling kalibrasi mutu',
           note: `Nilai Kalibrasi: ${nilaiKalibrasi}. Kesesuaian mutu: ${persentase}%. Terkunci maksimal 1 kali kalibrasi dan masuk ke history kalibrasi.`,
         },
@@ -1314,6 +1364,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // Counters for UI Badges
   const pendingPetugasCount = useMemo(() => {
+    if (!currentUser) return 0;
     return evaluations.filter((e) => {
       if (e.status !== 'MENUNGGU_REVIEW_PETUGAS') return false;
       if (currentUser.role === 'petugas') {
@@ -1327,6 +1378,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }, [evaluations, currentUser]);
 
   const pendingQaRebuttalCount = useMemo(() => {
+    if (!currentUser) return 0;
     return evaluations.filter((e) => {
       if (e.status !== 'PROSES_SANGGAHAN') return false;
       if (currentUser.role === 'qa') {
@@ -1419,6 +1471,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       value={{
         currentUser,
         setCurrentUser,
+        login,
+        logout,
         switchRole,
         users,
         addUser,

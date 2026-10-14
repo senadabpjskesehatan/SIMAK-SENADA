@@ -155,7 +155,7 @@ export const UserManagementView: React.FC = () => {
   };
 
   const handleDeleteClick = (user: User) => {
-    if (user.id === currentUser.id) {
+    if (currentUser && user.id === currentUser.id) {
       alert('Anda tidak dapat menghapus akun yang sedang Anda gunakan saat ini.');
       return;
     }
@@ -287,7 +287,7 @@ export const UserManagementView: React.FC = () => {
     setTimeout(() => setSuccessToast(null), 4000);
   };
 
-  if (currentUser.role !== 'admin') {
+  if (currentUser?.role !== 'admin') {
     return (
       <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center shadow-xs my-6">
         <div className="w-12 h-12 bg-rose-50 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-3">
@@ -491,7 +491,7 @@ export const UserManagementView: React.FC = () => {
               ) : (
                 paginatedUsers.map((user, idx) => {
                   const roleBadge = getRoleBadge(user.role);
-                  const isCurrent = user.id === currentUser.id;
+                  const isCurrent = currentUser ? user.id === currentUser.id : false;
 
                   return (
                     <tr key={user.id} className="hover:bg-slate-50 transition">

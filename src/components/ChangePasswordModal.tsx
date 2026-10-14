@@ -34,7 +34,7 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
   const [isSuccess, setIsSuccess] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  if (!isOpen) return null;
+  if (!isOpen || !currentUser) return null;
 
   const handleClose = () => {
     setOldPassword('');

@@ -29,13 +29,12 @@ export const PetugasInboxView: React.FC = () => {
     currentUser,
     indicators,
     users,
-    submitPetugasAcceptance,
     submitPetugasSanggahan,
     setActiveTab,
   } = useApp();
 
-  const isPetugas = currentUser.role === 'petugas';
-  const isTeamLeader = currentUser.role === 'team_leader';
+  const isPetugas = currentUser?.role === 'petugas';
+  const isTeamLeader = currentUser?.role === 'team_leader';
 
   // Subtabs: 'pending' (perlu ditinjau) | 'rebuttal' (sedang sanggahan) | 'final' (nilai akhir) | 'all'
   const [activeSubTab, setActiveSubTab] = useState<'pending' | 'rebuttal' | 'final' | 'all'>('pending');
@@ -44,30 +43,61 @@ export const PetugasInboxView: React.FC = () => {
 
   // Active item for sanggahan modal
   const [sanggahanTarget, setSanggahanTarget] = useState<SamplingEvaluation | null>(null);
-  const [alasanSanggahan, setAlasanSanggahan] = useState('Kesesuaian dengan SOP / Regulasi Terbaru');
+  const [selectedIndicatorId, setSelectedIndicatorId] = useState<string>(indicators[0]?.id || '');
   const [argumenPetugas, setArgumenPetugas] = useState('');
-  const [buktiPendukung, setBuktiPendukung] = useState('');
-  const [usulanNilai, setUsulanNilai] = useState<number | ''>('');
   const [formError, setFormError] = useState('');
 
   // Toast confirmation
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  // Helper to check if rebuttal deadline has passed (15th of the following month)
+  const isRebuttalDeadlinePassed = (tanggalSamplingStr: string): boolean => {
+    if (!tanggalSamplingStr) return false;
+    const parts = tanggalSamplingStr.split(' ')[0].split('-');
+    if (parts.length < 3) return false;
+    const year = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10); // 1-12
+    let targetYear = year;
+    let targetMonth = month + 1;
+    if (targetMonth > 12) {
+      targetMonth = 1;
+      targetYear += 1;
+    }
+    const deadlineDate = new Date(targetYear, targetMonth - 1, 15, 23, 59, 59);
+    return new Date() > deadlineDate;
+  };
+
+  const getDeadlineText = (tanggalSamplingStr: string) => {
+    if (!tanggalSamplingStr) return '-';
+    const parts = tanggalSamplingStr.split(' ')[0].split('-');
+    if (parts.length < 3) return '-';
+    const year = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10); // 1-12
+    let targetYear = year;
+    let targetMonth = month + 1;
+    if (targetMonth > 12) {
+      targetMonth = 1;
+      targetYear += 1;
+    }
+    const monthNames = [
+      '', 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+      'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+    ];
+    return `15 ${monthNames[targetMonth]} ${targetYear}`;
+  };
+
   // Filter base evaluations based on role
   const relevantEvaluations = useMemo(() => {
     return evaluations.filter((e) => {
-      if (isPetugas) {
-        // Petugas only sees tickets where namaPetugas matches their name
+      if (isPetugas && currentUser) {
         return e.ticket.namaPetugas.toLowerCase() === currentUser.name.toLowerCase();
       }
-      if (isTeamLeader) {
-        // Team Leader only sees tickets belonging to their TIM
+      if (isTeamLeader && currentUser) {
         if (currentUser.team) {
           return e.petugasTeam === currentUser.team;
         }
         return true;
       }
-      // For Admin, QA, or Pusat viewing this page
       return true;
     });
   }, [evaluations, isPetugas, isTeamLeader, currentUser]);
@@ -89,15 +119,12 @@ export const PetugasInboxView: React.FC = () => {
   // Filtered displayed items
   const displayedItems = useMemo(() => {
     return relevantEvaluations.filter((e) => {
-      // Subtab filter
       if (activeSubTab === 'pending' && e.status !== 'MENUNGGU_REVIEW_PETUGAS') return false;
       if (activeSubTab === 'rebuttal' && e.status !== 'PROSES_SANGGAHAN') return false;
       if (activeSubTab === 'final' && e.status !== 'KEPUTUSAN_AKHIR' && e.status !== 'SELESAI_DITERIMA') return false;
 
-      // Agent filter (for Team Leader)
       if (agentFilter !== 'all' && e.ticket.namaPetugas !== agentFilter) return false;
 
-      // Search query
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const matches =
@@ -114,38 +141,43 @@ export const PetugasInboxView: React.FC = () => {
   }, [relevantEvaluations, activeSubTab, agentFilter, searchQuery]);
 
   const handleOpenSanggahanModal = (item: SamplingEvaluation) => {
-    setSanggahanTarget(item);
-    setAlasanSanggahan('Kesesuaian dengan SOP / Regulasi Terbaru');
-    setArgumenPetugas('');
-    setBuktiPendukung('');
-    setUsulanNilai(Math.min(100, Math.round(item.nilaiAwal + 10)));
-    setFormError('');
-  };
-
-  const handleAcceptScore = (item: SamplingEvaluation) => {
-    if (confirm(`Apakah Anda yakin menerima nilai mutu ${item.nilaiFinal} untuk tiket ${item.nomorTiket}?`)) {
-      submitPetugasAcceptance(item.id);
-      setToastMessage(`Nilai untuk tiket ${item.nomorTiket} (${item.nilaiFinal}) berhasil disetujui tanpa sanggahan.`);
-      setTimeout(() => setToastMessage(null), 5000);
+    if (isRebuttalDeadlinePassed(item.tanggalSampling)) {
+      alert(`Batas waktu pengajuan sanggahan resmi (maksimal tanggal 15 bulan berikutnya: ${getDeadlineText(item.tanggalSampling)}) telah berakhir.`);
+      return;
     }
+    setSanggahanTarget(item);
+    setSelectedIndicatorId(indicators[0]?.id || '');
+    setArgumenPetugas('');
+    setFormError('');
   };
 
   const handleSubmitSanggahan = (e: React.FormEvent) => {
     e.preventDefault();
     if (!sanggahanTarget) return;
 
-    if (!argumenPetugas.trim() || argumenPetugas.length < 15) {
-      setFormError('Mohon berikan argumen sanggahan secara jelas dan komprehensif (minimal 15 karakter).');
+    if (isRebuttalDeadlinePassed(sanggahanTarget.tanggalSampling)) {
+      setFormError('Batas waktu sanggahan resmi telah terlewati.');
       return;
     }
+
+    if (!selectedIndicatorId) {
+      setFormError('Mohon pilih indikator yang disanggah.');
+      return;
+    }
+
+    if (!argumenPetugas.trim() || argumenPetugas.length < 10) {
+      setFormError('Mohon isi penjelasan sanggahan secara lengkap (minimal 10 karakter).');
+      return;
+    }
+
+    const selectedInd = indicators.find((i) => i.id === selectedIndicatorId);
+    const alasanSanggahan = selectedInd ? `Indikator Disanggah: ${selectedInd.nama}` : 'Sanggahan Indikator Mutu';
 
     const payload: SanggahanData = {
       tanggalSanggah: new Date().toISOString().replace('T', ' ').slice(0, 19),
       alasanSanggahan,
       argumenPetugas: argumenPetugas.trim(),
-      buktiPendukung: buktiPendukung.trim() || undefined,
-      usulanNilai: typeof usulanNilai === 'number' ? usulanNilai : undefined,
-      petugasName: currentUser.name,
+      petugasName: currentUser?.name || 'Petugas',
     };
 
     submitPetugasSanggahan(sanggahanTarget.id, payload);
@@ -153,7 +185,7 @@ export const PetugasInboxView: React.FC = () => {
     const targetQA = sanggahanTarget.qaName;
     setSanggahanTarget(null);
 
-    setToastMessage(`Sanggahan tiket ${targetNo} berhasil diajukan dan diteruskan kembali ke QA Penilai (${targetQA}).`);
+    setToastMessage(`Sanggahan tiket ${targetNo} berhasil diajukan dan diteruskan ke QA Penilai (${targetQA}).`);
     setTimeout(() => setToastMessage(null), 6000);
     setActiveSubTab('rebuttal');
   };
@@ -187,17 +219,17 @@ export const PetugasInboxView: React.FC = () => {
               <div className="flex items-center gap-2">
                 <h1 className="text-base font-bold text-slate-900">
                   {isTeamLeader
-                    ? `Inbox Pengawasan Sampling Tim: ${currentUser.team || 'Tim Pelayanan'}`
-                    : `Inbox Hasil Sampling Petugas (${currentUser.name})`}
+                    ? `Inbox Pengawasan Sampling Tim: ${currentUser?.team || 'Tim Pelayanan'}`
+                    : `Inbox Hasil Sampling Petugas (${currentUser?.name || 'Petugas'})`}
                 </h1>
                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${isTeamLeader ? 'bg-amber-100 text-amber-800 border border-amber-200' : 'bg-blue-100 text-blue-800 border border-blue-200'}`}>
-                  {isTeamLeader ? `Team Leader · ${currentUser.team || 'TIM'}` : `Petugas · ${currentUser.team || 'TIM'}`}
+                  {isTeamLeader ? `Team Leader · ${currentUser?.team || 'TIM'}` : `Petugas · ${currentUser?.team || 'TIM'}`}
                 </span>
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
                 {isTeamLeader
-                  ? `Memantau hasil sampling mutu jawaban petugas kelompok ${currentUser.team || 'TIM'}, status sanggahan ke QA, dan nilai akhir.`
-                  : 'Hasil penilaian mutu sampling dari Quality Assurance. Anda dapat menyetujui nilai atau mengajukan sanggahan resmi.'}
+                  ? `Memantau hasil sampling mutu jawaban petugas kelompok ${currentUser?.team || 'TIM'}, status sanggahan ke QA, dan nilai akhir.`
+                  : 'Hasil penilaian mutu sampling dari Quality Assurance. Jika tidak disanggah hingga tanggal 15 bulan berikutnya, nilai otomatis menjadi nilai akhir.'}
               </p>
             </div>
           </div>
@@ -211,16 +243,6 @@ export const PetugasInboxView: React.FC = () => {
             )}
           </div>
         </div>
-
-        {/* Informational banner if role is admin or pusat viewing this tab */}
-        {!isPetugas && !isTeamLeader && (
-          <div className="p-3 bg-purple-50 border border-purple-200 rounded-lg text-xs text-purple-900 flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-purple-700 shrink-0" />
-            <span>
-              Anda sedang login sebagai <strong>{currentUser.role.toUpperCase()}</strong>. Menu ini menampilkan seluruh sampling petugas untuk monitoring.
-            </span>
-          </div>
-        )}
 
         {/* Subtabs Bar */}
         <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-100">
@@ -320,7 +342,7 @@ export const PetugasInboxView: React.FC = () => {
           </h3>
           <p className="text-xs text-slate-500 max-w-md mx-auto">
             {activeSubTab === 'pending'
-              ? 'Tidak ada tiket hasil sampling QA yang menunggu konfirmasi saat ini.'
+              ? 'Tidak ada tiket hasil sampling QA yang menunggu peninjauan saat ini.'
               : activeSubTab === 'rebuttal'
               ? 'Tidak ada tiket yang sedang dalam proses sanggahan ke QA.'
               : 'Belum ada data tiket dengan filter yang dipilih.'}
@@ -332,6 +354,8 @@ export const PetugasInboxView: React.FC = () => {
             const isPending = item.status === 'MENUNGGU_REVIEW_PETUGAS';
             const isRebuttal = item.status === 'PROSES_SANGGAHAN';
             const isCompleted = item.status === 'KEPUTUSAN_AKHIR' || item.status === 'SELESAI_DITERIMA';
+            const deadlinePassed = isRebuttalDeadlinePassed(item.tanggalSampling);
+            const deadlineStr = getDeadlineText(item.tanggalSampling);
 
             return (
               <div
@@ -351,7 +375,7 @@ export const PetugasInboxView: React.FC = () => {
                       {item.nomorTiket}
                     </span>
                     <span className="text-xs text-slate-500 flex items-center gap-1">
-                      <Clock className="w-3 h-3" /> {item.ticket.tanggalTiket}
+                      <Clock className="w-3 h-3" /> Tanggal Sampling: {item.tanggalSampling}
                     </span>
                     <span className="text-slate-300">·</span>
                     <span className="text-xs text-slate-700 font-semibold">
@@ -370,7 +394,7 @@ export const PetugasInboxView: React.FC = () => {
                     {/* Status Badge */}
                     {isPending && (
                       <span className="px-2.5 py-1 rounded-md text-[11px] font-bold bg-blue-100 text-blue-800 border border-blue-200 flex items-center gap-1">
-                        <Clock className="w-3 h-3" /> Menunggu Review Petugas
+                        <Clock className="w-3 h-3" /> Menunggu Sanggahan (Batas: {deadlineStr})
                       </span>
                     )}
                     {isRebuttal && (
@@ -380,7 +404,7 @@ export const PetugasInboxView: React.FC = () => {
                     )}
                     {item.status === 'SELESAI_DITERIMA' && (
                       <span className="px-2.5 py-1 rounded-md text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1">
-                        <CheckCheck className="w-3 h-3" /> Nilai Disetujui
+                        <CheckCheck className="w-3 h-3" /> Tanpa Sanggahan (Otomatis Final)
                       </span>
                     )}
                     {item.status === 'KEPUTUSAN_AKHIR' && (
@@ -455,7 +479,7 @@ export const PetugasInboxView: React.FC = () => {
                   </div>
                 </div>
 
-                {/* SANGGAHAN BOX (If in rebuttal or final decision) */}
+                {/* SANGGAHAN BOX */}
                 {item.sanggahan && (
                   <div className="bg-amber-50/60 border border-amber-200 rounded-lg p-3.5 text-xs space-y-2">
                     <div className="flex items-center justify-between text-amber-900 font-bold">
@@ -469,19 +493,14 @@ export const PetugasInboxView: React.FC = () => {
                     </div>
                     <div className="text-slate-800 bg-white p-2.5 rounded border border-amber-100">
                       <div className="text-[11px] font-semibold text-amber-800 mb-1">
-                        Alasan: {item.sanggahan.alasanSanggahan} {item.sanggahan.usulanNilai ? `· Usulan Nilai: ${item.sanggahan.usulanNilai}` : ''}
+                        {item.sanggahan.alasanSanggahan}
                       </div>
                       <p className="leading-relaxed whitespace-pre-wrap">{item.sanggahan.argumenPetugas}</p>
-                      {item.sanggahan.buktiPendukung && (
-                        <div className="mt-1 text-[11px] text-slate-500 font-medium">
-                          <strong>Bukti / Dasar SOP:</strong> {item.sanggahan.buktiPendukung}
-                        </div>
-                      )}
                     </div>
                   </div>
                 )}
 
-                {/* KEPUTUSAN AKHIR QA BOX (If QA has resolved rebuttal) */}
+                {/* KEPUTUSAN AKHIR QA BOX */}
                 {item.keputusanAkhir && (
                   <div className="bg-emerald-50/70 border border-emerald-300 rounded-lg p-3.5 text-xs space-y-2">
                     <div className="flex items-center justify-between text-emerald-950 font-bold">
@@ -523,30 +542,28 @@ export const PetugasInboxView: React.FC = () => {
                   </div>
                 )}
 
-                {/* Actions Footer: Petugas can Accept or Rebut if status is MENUNGGU_REVIEW_PETUGAS */}
+                {/* Actions Footer: Only "Ajukan Sanggahan Resmi" button if pending and deadline not passed (No Accept button) */}
                 {isPending && isPetugas && (
                   <div className="pt-2 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3">
                     <span className="text-xs text-slate-500">
-                      Silakan periksa kesesuaian nilai mutu. Jika sudah sesuai, klik Setujui Nilai. Jika terdapat ketidaksesuaian regulasi, ajukan sanggahan.
+                      {deadlinePassed ? (
+                        <strong className="text-rose-600">Batas waktu sanggahan resmi telah terlewati (maksimal {deadlineStr}). Nilai awal otomatis menjadi nilai akhir.</strong>
+                      ) : (
+                        <span>Batas waktu pengajuan sanggahan resmi: <strong>{deadlineStr}</strong> (Maksimal tanggal 15 bulan berikutnya).</span>
+                      )}
                     </span>
 
-                    <div className="flex items-center gap-2 w-full sm:w-auto">
-                      <button
-                        onClick={() => handleOpenSanggahanModal(item)}
-                        className="w-full sm:w-auto px-4 py-2 border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5"
-                      >
-                        <RotateCcw className="w-3.5 h-3.5 text-amber-700" />
-                        Ajukan Sanggahan Resmi
-                      </button>
-
-                      <button
-                        onClick={() => handleAcceptScore(item)}
-                        className="w-full sm:w-auto px-4 py-2 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-xs"
-                      >
-                        <CheckCheck className="w-3.5 h-3.5" />
-                        Setujui Nilai ({item.nilaiAwal})
-                      </button>
-                    </div>
+                    {!deadlinePassed && (
+                      <div className="flex items-center gap-2 w-full sm:w-auto">
+                        <button
+                          onClick={() => handleOpenSanggahanModal(item)}
+                          className="w-full sm:w-auto px-4 py-2 border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-xs"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5 text-amber-700" />
+                          Ajukan Sanggahan Resmi
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -554,7 +571,7 @@ export const PetugasInboxView: React.FC = () => {
                 {isPending && isTeamLeader && (
                   <div className="pt-2 border-t border-slate-100 text-xs text-amber-700 flex items-center justify-between">
                     <span>
-                      Menunggu konfirmasi atau sanggahan dari petugas yang bersangkutan (<strong>{item.ticket.namaPetugas}</strong>).
+                      Menunggu sanggahan dari petugas ({item.ticket.namaPetugas}). Batas sanggahan: <strong>{deadlineStr}</strong>.
                     </span>
                     <span className="text-[11px] font-semibold text-slate-500">
                       Team Leader Monitoring
@@ -578,10 +595,10 @@ export const PetugasInboxView: React.FC = () => {
                 </div>
                 <div>
                   <h3 className="font-bold text-sm">
-                    Form Pengajuan Sanggahan Hasil Sampling Mutu
+                    Form Pengajuan Sanggahan Resmi
                   </h3>
                   <p className="text-xs text-amber-100">
-                    Nomor Tiket: <strong className="font-mono">{sanggahanTarget.nomorTiket}</strong> · Asesor QA Penilai: <strong>{sanggahanTarget.qaName}</strong>
+                    Nomor Tiket: <strong className="font-mono">{sanggahanTarget.nomorTiket}</strong> · Asesor QA: <strong>{sanggahanTarget.qaName}</strong>
                   </p>
                 </div>
               </div>
@@ -596,7 +613,7 @@ export const PetugasInboxView: React.FC = () => {
             <form onSubmit={handleSubmitSanggahan} className="p-6 space-y-4 text-xs">
               <div className="bg-amber-50 p-3 rounded-xl border border-amber-200 text-amber-900">
                 <p className="font-medium">
-                  Sanggahan yang Anda kirimkan akan <strong>masuk kembali ke user Quality Assurance yang melakukan sampling ({sanggahanTarget.qaName})</strong> pada jawaban ini. QA akan meninjau dan menetapkan nilai akhir yang resmi.
+                  Sanggahan resmi hanya dapat diajukan maksimal pada tanggal <strong>15 bulan berikutnya</strong> setelah tanggal sampling. Sanggahan akan dikirimkan kembali ke Asesor QA ({sanggahanTarget.qaName}).
                 </p>
               </div>
 
@@ -607,78 +624,42 @@ export const PetugasInboxView: React.FC = () => {
                 </div>
               )}
 
+              {/* 3.a. Indikator : pilihan dropdown sesuai indikator yang sudah dibuat. wajib diisi */}
               <div>
                 <label className="block font-bold text-slate-700 mb-1">
-                  Kategori / Alasan Pokok Sanggahan *
+                  Indikator Mutu yang Disanggah *
                 </label>
                 <select
-                  value={alasanSanggahan}
-                  onChange={(e) => setAlasanSanggahan(e.target.value)}
+                  required
+                  value={selectedIndicatorId}
+                  onChange={(e) => setSelectedIndicatorId(e.target.value)}
                   className="w-full p-2.5 rounded-lg border border-slate-300 bg-white focus:ring-2 focus:ring-amber-500 font-medium text-slate-800"
                 >
-                  <option value="Kesesuaian dengan SOP / Regulasi Terbaru">
-                    Kesesuaian dengan SOP / Regulasi Terbaru (Perpres, Permenkes, Buku Panduan Layanan)
-                  </option>
-                  <option value="Jawaban Sudah Lengkap & Menuntaskan Keluhan">
-                    Jawaban Sudah Lengkap & Menuntaskan Keluhan Peserta
-                  </option>
-                  <option value="Penulisan EYD, Format & Kerapian Teks Sudah Baku">
-                    Penulisan EYD, Format & Kerapian Teks Sudah Baku
-                  </option>
-                  <option value="Edukasi Kanal Digital / PANDAWA Telah Disampaikan">
-                    Edukasi Kanal Digital / PANDAWA Telah Disampaikan
-                  </option>
-                  <option value="Faktor Kendala Sistem Faskes / Kondisi Khusus">
-                    Faktor Kendala Sistem Faskes / Kondisi Khusus Peserta
-                  </option>
-                  <option value="Lainnya">Lainnya</option>
+                  <option value="" disabled>-- Pilih Indikator Mutu --</option>
+                  {indicators.map((ind) => (
+                    <option key={ind.id} value={ind.id}>
+                      {ind.nama} (Bobot: {ind.bobot}%)
+                    </option>
+                  ))}
                 </select>
               </div>
 
+              {/* 3.b. Penjelasan : free text yang dapat diisi oleh petugas layanan. wajib diisi */}
               <div>
                 <label className="block font-bold text-slate-700 mb-1">
-                  Penjelasan & Argumentasi Lengkap Petugas *
+                  Penjelasan / Argumentasi Sanggahan *
                 </label>
                 <textarea
                   rows={4}
                   required
                   value={argumenPetugas}
                   onChange={(e) => setArgumenPetugas(e.target.value)}
-                  placeholder="Jelaskan secara komprehensif mengapa jawaban Anda telah memenuhi standar atau mengapa indikator tertentu layak mendapatkan penilaian lebih tinggi..."
+                  placeholder="Masukkan penjelasan komprehensif mengapa penilaian indikator tersebut tidak sesuai dan sertakan dasar ketentuan atau SOP..."
                   className="w-full p-3 rounded-lg border border-slate-300 focus:ring-2 focus:ring-amber-500 bg-white text-xs leading-relaxed"
                 />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">
-                    Bukti Pendukung / Nomor Dokumen SOP (Opsional)
-                  </label>
-                  <input
-                    type="text"
-                    value={buktiPendukung}
-                    onChange={(e) => setBuktiPendukung(e.target.value)}
-                    placeholder="Contoh: Buku Panduan Layanan JKN 2024 Hal. 42 / SE Dir 12"
-                    className="w-full p-2.5 rounded-lg border border-slate-300 bg-white focus:ring-2 focus:ring-amber-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">
-                    Usulan Nilai Baru Petugas (Opsional)
-                  </label>
-                  <input
-                    type="number"
-                    min={0}
-                    max={100}
-                    value={usulanNilai}
-                    onChange={(e) => setUsulanNilai(e.target.value === '' ? '' : Number(e.target.value))}
-                    placeholder="misal: 88"
-                    className="w-full p-2.5 rounded-lg border border-slate-300 bg-white focus:ring-2 focus:ring-amber-500 font-bold text-slate-800"
-                  />
-                </div>
-              </div>
-
+              {/* 3.c & 3.d. Button batal & Kirim sanggahan */}
               <div className="pt-4 border-t border-slate-200 flex items-center justify-end gap-2">
                 <button
                   type="button"
@@ -692,7 +673,7 @@ export const PetugasInboxView: React.FC = () => {
                   className="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg shadow-xs flex items-center gap-2 transition"
                 >
                   <Send className="w-3.5 h-3.5" />
-                  Kirimkan Sanggahan ke QA ({sanggahanTarget.qaName})
+                  Kirim Sanggahan
                 </button>
               </div>
             </form>

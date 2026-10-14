@@ -16,6 +16,7 @@ import { IndicatorManagerView } from './components/IndicatorManagerView';
 import { GoogleSheetSyncView } from './components/GoogleSheetSyncView';
 import { CalibrationView } from './components/CalibrationView';
 import { UserManagementView } from './components/UserManagementView';
+import { LoginView } from './components/LoginView';
 import { UserRole } from './types';
 
 function MainContent() {
@@ -24,6 +25,7 @@ function MainContent() {
 
   // Guard: if current tab is not allowed for current role, default to dashboard
   React.useEffect(() => {
+    if (!currentUser) return;
     const roleAllowedTabs: Record<UserRole, string[]> = {
       admin: ['dashboard', 'kalibrasi', 'users-management'],
       pusat: ['dashboard', 'kalibrasi'],
@@ -35,7 +37,12 @@ function MainContent() {
     if (!roleAllowedTabs[currentUser.role]?.includes(activeTab)) {
       setActiveTab('dashboard');
     }
-  }, [currentUser.role, activeTab, setActiveTab]);
+  }, [currentUser, activeTab, setActiveTab]);
+
+  // Halaman awal login jika belum masuk atau setelah logout
+  if (!currentUser) {
+    return <LoginView />;
+  }
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50/70 text-slate-900">

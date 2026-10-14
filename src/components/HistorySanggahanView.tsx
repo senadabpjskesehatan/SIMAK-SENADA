@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { SamplingEvaluation } from '../types';
+import * as XLSX from 'xlsx';
 import {
   History,
   CheckCircle2,
@@ -16,6 +17,7 @@ import {
   FileText,
   ShieldCheck,
   Scale,
+  FileSpreadsheet,
 } from 'lucide-react';
 
 export const HistorySanggahanView: React.FC = () => {
@@ -23,24 +25,48 @@ export const HistorySanggahanView: React.FC = () => {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedAgent, setSelectedAgent] = useState('all');
+  const [selectedMonth, setSelectedMonth] = useState('all');
   const [selectedStatus, setSelectedStatus] = useState('all');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  // Unique sampling months
+  const samplingMonthList = useMemo(() => {
+    const set = new Set<string>();
+    evaluations.forEach((e) => {
+      if (e.tanggalSampling) {
+        const m = e.tanggalSampling.slice(0, 7); // YYYY-MM
+        if (m) set.add(m);
+      }
+    });
+    return Array.from(set).sort().reverse();
+  }, [evaluations]);
 
   // Filtered list
   const filteredList = useMemo(() => {
     return evaluations.filter((e) => {
-      // Petugas specific role restriction
-      if (currentUser.role === 'petugas') {
-        if (e.ticket.namaPetugas.toLowerCase() !== currentUser.name.toLowerCase()) {
+      // Role restrictions
+      if (currentUser?.role === 'petugas') {
+        if (e.ticket.namaPetugas.toLowerCase() !== (currentUser?.name || '').toLowerCase()) {
           return false;
         }
-      } else if (currentUser.role === 'team_leader') {
-        if (currentUser.team && e.petugasTeam !== currentUser.team) {
+      } else if (currentUser?.role === 'team_leader') {
+        if (currentUser?.team && e.petugasTeam !== currentUser.team) {
+          return false;
+        }
+      } else if (currentUser?.role === 'qa') {
+        // QA only sees data evaluated by themselves
+        if (e.qaId !== currentUser.id && e.qaName.toLowerCase() !== (currentUser?.name || '').toLowerCase()) {
           return false;
         }
       }
 
       if (selectedAgent !== 'all' && e.ticket.namaPetugas !== selectedAgent) return false;
+
+      if (selectedMonth !== 'all') {
+        if (!e.tanggalSampling || !e.tanggalSampling.startsWith(selectedMonth)) {
+          return false;
+        }
+      }
 
       if (selectedStatus !== 'all') {
         if (selectedStatus === 'SELESAI_DITERIMA' && e.status !== 'SELESAI_DITERIMA') return false;
@@ -63,7 +89,7 @@ export const HistorySanggahanView: React.FC = () => {
 
       return true;
     });
-  }, [evaluations, selectedAgent, selectedStatus, searchQuery, currentUser]);
+  }, [evaluations, selectedAgent, selectedMonth, selectedStatus, searchQuery, currentUser]);
 
   // Unique agents
   const agentList = useMemo(() => {
@@ -78,45 +104,33 @@ export const HistorySanggahanView: React.FC = () => {
     setExpandedId((prev) => (prev === id ? null : id));
   };
 
-  // Export to CSV
-  const handleExportCSV = () => {
-    const headers = [
-      'Nomor Tiket',
-      'Tanggal Tiket',
-      'Petugas',
-      'Kategori',
-      'Pokok Masalah',
-      'Nilai Awal QA',
-      'Ada Sanggahan',
-      'Alasan Sanggahan',
-      'Putusan QA',
-      'Nilai Akhir Final',
-      'Status',
-    ];
+  // Export to Excel (.xlsx)
+  const handleExportExcel = () => {
+    const dataToExport = filteredList.map((e) => ({
+      'Nomor Tiket': e.nomorTiket,
+      'Tanggal Sampling': e.tanggalSampling,
+      'Tanggal Tiket': e.ticket.tanggalTiket,
+      'Petugas': e.ticket.namaPetugas,
+      'Tim Petugas': e.petugasTeam || '-',
+      'Kategori': e.ticket.kategori,
+      'Pokok Masalah': e.ticket.pokokMasalah,
+      'Topik Masalah': e.ticket.topikMasalah || '-',
+      'Asesor QA': e.qaName,
+      'Nilai Awal QA': e.nilaiAwal,
+      'Catatan Awal QA': e.catatanAwalQA || '-',
+      'Ada Sanggahan': e.sanggahan ? 'Ya' : 'Tidak',
+      'Alasan Sanggahan': e.sanggahan?.alasanSanggahan || '-',
+      'Argumen Petugas': e.sanggahan?.argumenPetugas || '-',
+      'Status Putusan QA': e.keputusanAkhir?.statusPutusan || '-',
+      'Catatan Putusan QA': e.keputusanAkhir?.catatanPutusanQA || '-',
+      'Nilai Akhir Final': e.nilaiFinal,
+      'Status': e.status,
+    }));
 
-    const rows = filteredList.map((e) => [
-      `"${e.nomorTiket}"`,
-      `"${e.ticket.tanggalTiket}"`,
-      `"${e.ticket.namaPetugas}"`,
-      `"${e.ticket.kategori}"`,
-      `"${e.ticket.pokokMasalah}"`,
-      e.nilaiAwal,
-      e.sanggahan ? 'Ya' : 'Tidak',
-      `"${e.sanggahan?.alasanSanggahan || '-'}"`,
-      `"${e.keputusanAkhir?.statusPutusan || '-'}"`,
-      e.nilaiFinal,
-      `"${e.status}"`,
-    ]);
-
-    const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', `rekap_mutu_dan_sanggahan_${new Date().toISOString().slice(0, 10)}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Rekap Mutu & Sanggahan');
+    XLSX.writeFile(workbook, `rekap_mutu_dan_sanggahan_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
   const getStatusBadge = (e: SamplingEvaluation) => {
@@ -186,11 +200,11 @@ export const HistorySanggahanView: React.FC = () => {
           </div>
 
           <button
-            onClick={handleExportCSV}
-            className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold shadow-xs flex items-center gap-2 transition"
+            onClick={handleExportExcel}
+            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-xs flex items-center gap-2 transition"
           >
-            <Download className="w-3.5 h-3.5" />
-            Ekspor Rekap CSV
+            <FileSpreadsheet className="w-3.5 h-3.5" />
+            Ekspor Rekap Excel
           </button>
         </div>
 
@@ -210,17 +224,41 @@ export const HistorySanggahanView: React.FC = () => {
             </div>
 
             {/* Petugas Filter */}
+            {currentUser?.role !== 'petugas' && (
+              <select
+                value={selectedAgent}
+                onChange={(e) => setSelectedAgent(e.target.value)}
+                className="text-xs bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500 font-medium"
+              >
+                <option value="all">Semua Petugas ({agentList.length})</option>
+                {agentList.map((ag) => (
+                  <option key={ag} value={ag}>
+                    {ag}
+                  </option>
+                ))}
+              </select>
+            )}
+
+            {/* Sampling Month Filter */}
             <select
-              value={selectedAgent}
-              onChange={(e) => setSelectedAgent(e.target.value)}
+              value={selectedMonth}
+              onChange={(e) => setSelectedMonth(e.target.value)}
               className="text-xs bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500 font-medium"
             >
-              <option value="all">Semua Petugas ({agentList.length})</option>
-              {agentList.map((ag) => (
-                <option key={ag} value={ag}>
-                  {ag}
-                </option>
-              ))}
+              <option value="all">Semua Bulan Sampling</option>
+              {samplingMonthList.map((m) => {
+                const [year, month] = m.split('-');
+                const monthNames = [
+                  '', 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+                  'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+                ];
+                const monthName = monthNames[parseInt(month, 10)] || month;
+                return (
+                  <option key={m} value={m}>
+                    {monthName} {year}
+                  </option>
+                );
+              })}
             </select>
 
             {/* Status Filter */}

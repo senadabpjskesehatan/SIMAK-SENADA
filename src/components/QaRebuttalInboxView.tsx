@@ -38,7 +38,7 @@ export const QaRebuttalInboxView: React.FC = () => {
   // Rebuttals targeted to the currently logged in QA
   const myRebuttals = useMemo(() => {
     return pendingRebuttals.filter(
-      (e) => e.qaId === currentUser.id || e.qaName.toLowerCase() === currentUser.name.toLowerCase()
+      (e) => !!currentUser && (e.qaId === currentUser.id || e.qaName.toLowerCase() === currentUser.name.toLowerCase())
     );
   }, [pendingRebuttals, currentUser]);
 
@@ -128,7 +128,7 @@ export const QaRebuttalInboxView: React.FC = () => {
 
     const payload: KeputusanAkhirData = {
       tanggalKeputusan: new Date().toISOString().replace('T', ' ').slice(0, 19),
-      qaName: currentUser.name,
+      qaName: currentUser?.name || 'Quality Assurance',
       statusPutusan: decisionType,
       nilaiAkhir: finalTotal,
       finalScores,
@@ -178,7 +178,7 @@ export const QaRebuttalInboxView: React.FC = () => {
                   Inbox Sanggahan Quality Assurance
                 </h1>
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-teal-100 text-teal-800 border border-teal-200">
-                  Asesor: {currentUser.name}
+                  Asesor: {currentUser?.name || 'QA'}
                 </span>
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
@@ -256,7 +256,7 @@ export const QaRebuttalInboxView: React.FC = () => {
       ) : (
         <div className="space-y-4">
           {displayedRebuttals.map((item) => {
-            const isAssignedToMe = item.qaId === currentUser.id || item.qaName.toLowerCase() === currentUser.name.toLowerCase();
+            const isAssignedToMe = !currentUser ? false : (item.qaId === currentUser.id || item.qaName.toLowerCase() === currentUser.name.toLowerCase());
 
             return (
               <div

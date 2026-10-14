@@ -42,8 +42,8 @@ export const CalibrationView: React.FC = () => {
 
   // Sub-tabs: 'isi' | 'history' | 'dashboard'
   // If role is QA, default to dashboard since QA can't perform calibration (only Admin & Pusat)
-  const isQA = currentUser.role === 'qa';
-  const canPerformCalibration = currentUser.role === 'admin' || currentUser.role === 'pusat';
+  const isQA = currentUser?.role === 'qa';
+  const canPerformCalibration = currentUser?.role === 'admin' || currentUser?.role === 'pusat';
 
   const [activeSubTab, setActiveSubTab] = useState<'isi' | 'history' | 'dashboard'>(
     canPerformCalibration ? 'isi' : 'dashboard'
@@ -174,7 +174,7 @@ export const CalibrationView: React.FC = () => {
       scores: formattedScores,
       catatanKalibrasi:
         calibratorNotes.trim() ||
-        `Hasil kalibrasi kesesuaian nilai sampling QA oleh ${currentUser.name} (${currentUser.role.toUpperCase()}).`,
+        `Hasil kalibrasi kesesuaian nilai sampling QA oleh ${currentUser?.name || 'Asesor'} (${(currentUser?.role || '').toUpperCase()}).`,
     });
 
     const targetNo = selectedEvaluation.nomorTiket;

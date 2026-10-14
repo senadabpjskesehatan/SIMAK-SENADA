@@ -29,6 +29,8 @@ export const DashboardView: React.FC = () => {
     currentUser,
   } = useApp();
 
+  const role = currentUser?.role;
+
   // List of unique agents
   const agentList = useMemo(() => {
     const set = new Set<string>();
@@ -320,7 +322,7 @@ export const DashboardView: React.FC = () => {
                 Nilai akhir resmi setelah rekonsiliasi sanggahan QA
               </p>
             </div>
-            {['qa', 'team_leader', 'petugas'].includes(currentUser.role) ? (
+            {['qa', 'team_leader', 'petugas'].includes(role || '') ? (
               <button
                 onClick={() => setActiveTab('history')}
                 className="text-xs font-semibold text-teal-700 hover:text-teal-800 flex items-center gap-1"
@@ -423,7 +425,7 @@ export const DashboardView: React.FC = () => {
                   Distribusi nilai berdasarkan bobot indikator aktif
                 </p>
               </div>
-              {currentUser.role === 'qa' && (
+              {role === 'qa' && (
                 <button
                   onClick={() => setActiveTab('indicators')}
                   className="text-xs font-semibold text-teal-700 hover:text-teal-800"
@@ -485,16 +487,16 @@ export const DashboardView: React.FC = () => {
           </div>
           <div>
             <h4 className="font-bold text-sm">
-              {currentUser.role === 'qa'
+              {role === 'qa'
                 ? 'Ingin Melakukan Sampling Jawaban Sekarang?'
-                : currentUser.role === 'admin' || currentUser.role === 'pusat'
+                : role === 'admin' || role === 'pusat'
                 ? 'Uji Banding & Kalibrasi Nilai Sampling'
                 : 'Pusat Layanan & Monitoring Mutu Petugas'}
             </h4>
             <p className="text-xs text-teal-200 mt-0.5">
-              {currentUser.role === 'qa'
+              {role === 'qa'
                 ? 'Ambil sampel jawaban petugas secara acak atau pilih spesifik, lalu manfaatkan penilaian otomatis AI berbasis indikator aktif.'
-                : currentUser.role === 'admin' || currentUser.role === 'pusat'
+                : role === 'admin' || role === 'pusat'
                 ? 'Lakukan kalibrasi objektif dari jawaban yang telah disampling oleh Quality Assurance dengan sistem acak.'
                 : 'Pantau hasil penilaian mutu sampling dan perkembangan sanggahan layanan informasi dan pengaduan.'}
             </p>
@@ -502,7 +504,7 @@ export const DashboardView: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-3 w-full md:w-auto shrink-0">
-          {currentUser.role === 'qa' && (
+          {role === 'qa' && (
             <>
               <button
                 onClick={() => setActiveTab('sampling')}
@@ -519,7 +521,7 @@ export const DashboardView: React.FC = () => {
             </>
           )}
 
-          {currentUser.role === 'admin' && (
+          {role === 'admin' && (
             <>
               <button
                 onClick={() => setActiveTab('kalibrasi')}
@@ -536,7 +538,7 @@ export const DashboardView: React.FC = () => {
             </>
           )}
 
-          {currentUser.role === 'pusat' && (
+          {role === 'pusat' && (
             <button
               onClick={() => setActiveTab('kalibrasi')}
               className="w-full md:w-auto px-4 py-2 bg-purple-500 hover:bg-purple-400 text-slate-950 font-bold rounded-lg text-xs shadow-xs transition"
@@ -545,7 +547,7 @@ export const DashboardView: React.FC = () => {
             </button>
           )}
 
-          {(currentUser.role === 'petugas' || currentUser.role === 'team_leader') && (
+          {(role === 'petugas' || role === 'team_leader') && (
             <>
               <button
                 onClick={() => setActiveTab('inbox-petugas')}
