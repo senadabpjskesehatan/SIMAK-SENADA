@@ -1,0 +1,98 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User account information",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "username": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string" },
+        "email": { "type": "string" },
+        "avatar": { "type": "string" },
+        "division": { "type": "string" },
+        "nip": { "type": "string" },
+        "password": { "type": "string" },
+        "team": { "type": "string" }
+      },
+      "required": ["id", "username", "name", "role", "email"]
+    },
+    "Ticket": {
+      "title": "Ticket",
+      "description": "Support ticket data",
+      "type": "object",
+      "properties": {
+        "nomorTiket": { "type": "string" },
+        "tanggalTiket": { "type": "string" },
+        "kategori": { "type": "string" },
+        "pokokMasalah": { "type": "string" },
+        "topikMasalah": { "type": "string" },
+        "isiKeluhan": { "type": "string" },
+        "isiJawaban": { "type": "string" },
+        "rating": { "type": "number" },
+        "namaPetugas": { "type": "string" },
+        "sampled": { "type": "boolean" },
+        "samplingId": { "type": "string" }
+      },
+      "required": ["nomorTiket", "tanggalTiket", "kategori", "namaPetugas"]
+    },
+    "Indicator": {
+      "title": "Indicator",
+      "description": "Sampling indicator",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "nama": { "type": "string" },
+        "deskripsi": { "type": "string" },
+        "bobot": { "type": "number" }
+      },
+      "required": ["id", "nama", "bobot"]
+    },
+    "Evaluation": {
+      "title": "Evaluation",
+      "description": "Sampling evaluation record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "nomorTiket": { "type": "string" },
+        "qaId": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "nomorTiket", "qaId", "status"]
+    },
+    "Calibration": {
+      "title": "Calibration",
+      "description": "Calibration record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "samplingEvaluationId": { "type": "string" },
+        "nomorTiket": { "type": "string" }
+      },
+      "required": ["id", "samplingEvaluationId", "nomorTiket"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User profiles"
+    },
+    "/tickets/{ticketId}": {
+      "schema": { "$ref": "#/entities/Ticket" },
+      "description": "Tickets and their current state"
+    },
+    "/evaluations/{evalId}": {
+      "schema": { "$ref": "#/entities/Evaluation" },
+      "description": "Sampling evaluations"
+    },
+    "/indicators/{indId}": {
+      "schema": { "$ref": "#/entities/Indicator" },
+      "description": "Sampling indicators"
+    },
+    "/calibrations/{calId}": {
+      "schema": { "$ref": "#/entities/Calibration" },
+      "description": "Calibration records"
+    }
+  }
+}

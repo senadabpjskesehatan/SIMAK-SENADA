@@ -1,0 +1,8 @@
+{
+  "name": "Remix SENADA - Sampling \u0026 Penilaian Mutu Jawaban Petugas",
+  "description": "Sistem sampling jawaban petugas informasi dan pengaduan berbasis teks dilengkapi penilaian otomatis AI, kustomisasi indikator \u0026 bobot, sinkronisasi Google Sheet, alur sanggahan bertingkat, serta dashboard analitik realtime.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
