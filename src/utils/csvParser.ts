@@ -303,25 +303,179 @@ export function rowsToTickets(
 }
 
 /**
- * Robust, high-performance CSV parser that handles quotes, escaped quotes, newlines, and auto-detects delimiter (, or ; or \t)
+ * Converts array of key-value objects (e.g. from JSON web service or Apps Script) into structured Ticket list
  */
-export function parseCSV(csvText: string): { data: Ticket[]; headers: string[]; rawCount: number } {
-  if (!csvText || !csvText.trim()) {
+export function objectsToTickets(
+  items: Record<string, any>[]
+): { data: Ticket[]; headers: string[]; rawCount: number } {
+  if (!items || !Array.isArray(items) || items.length === 0) {
     return { data: [], headers: [], rawCount: 0 };
   }
 
-  // 1. Try ultra-fast native parser first (<10ms for thousands of rows)
+  const headerSet = new Set<string>();
+  items.forEach((item) => {
+    if (item && typeof item === 'object') {
+      Object.keys(item).forEach((k) => headerSet.add(k));
+    }
+  });
+  const rawHeaders = Array.from(headerSet);
+
+  const tickets: Ticket[] = [];
+  for (const item of items) {
+    if (!item || typeof item !== 'object') continue;
+
+    const mapped: Record<string, any> = {};
+    for (const [k, v] of Object.entries(item)) {
+      const normKey = normalizeColumnKey(k);
+      mapped[normKey] = v;
+    }
+
+    const nomorTiket =
+      String(mapped.nomorTiket || item.id || item.no || '').trim() ||
+      `TKT-${new Date().getFullYear()}-${String(tickets.length + 1).padStart(4, '0')}`;
+    const isiKeluhan = String(
+      mapped.isiKeluhan || item.keluhan || item.pertanyaan || item.pesan || item.uraian || ''
+    ).trim();
+    const isiJawaban = String(
+      mapped.isiJawaban || item.jawaban || item.respons || item.solusi || item.tanggapan || ''
+    ).trim();
+    const namaPetugas = String(
+      mapped.namaPetugas || item.petugas || item.agent || item.cs || 'Petugas Layanan'
+    ).trim();
+    const kategoriStr = String(mapped.kategori || item.jenis || '').toLowerCase();
+    const kategori = kategoriStr.includes('pengaduan') ? 'Pengaduan' : 'Informasi';
+
+    if (isiKeluhan || isiJawaban || mapped.pokokMasalah || mapped.namaPetugas || mapped.nomorTiket) {
+      tickets.push({
+        nomorTiket,
+        tanggalTiket: normalizeDate(mapped.tanggalTiket || item.tanggal || item.tgl),
+        kategori,
+        pokokMasalah: String(mapped.pokokMasalah || item.masalah || 'Pelayanan Faskes').trim(),
+        topikMasalah: String(mapped.topikMasalah || item.topik || 'Layanan Umum').trim(),
+        isiKeluhan: isiKeluhan || 'Pertanyaan/keluhan peserta tercatat dalam webservice.',
+        isiJawaban: isiJawaban || 'Petugas telah memberikan respons penyelesaian kendala peserta.',
+        rating: normalizeRating(mapped.rating ?? item.rating ?? item.skor),
+        namaPetugas: namaPetugas || 'Petugas Layanan',
+        sampled: false,
+      });
+    }
+  }
+
+  return {
+    data: tickets,
+    headers: rawHeaders,
+    rawCount: items.length,
+  };
+}
+
+/**
+ * Parses Google Visualization (GViz) JSON responses (e.g., google.visualization.Query.setResponse)
+ */
+export function parseGVizResponse(text: string): { data: Ticket[]; headers: string[]; rawCount: number } {
   try {
-    const delimiter = detectDelimiter(csvText);
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    if (start === -1 || end === -1 || end <= start) {
+      return { data: [], headers: [], rawCount: 0 };
+    }
+    const jsonStr = text.slice(start, end + 1);
+    const parsed = JSON.parse(jsonStr);
+    const table = parsed?.table;
+    if (!table) return { data: [], headers: [], rawCount: 0 };
+
+    const cols = (table.cols || []).map((c: any) => c?.label || c?.id || '');
+    const rows: any[][] = [cols];
+    for (const r of table.rows || []) {
+      const rowCells = (r?.c || []).map((cell: any) => cell?.f ?? cell?.v ?? '');
+      rows.push(rowCells);
+    }
+    return rowsToTickets(rows, 'gviz');
+  } catch (e) {
+    console.warn('GViz parse error:', e);
+    return { data: [], headers: [], rawCount: 0 };
+  }
+}
+
+/**
+ * Robust, universal parser that handles:
+ * - JSON responses from Google Apps Script Web Apps / Web Services
+ * - Google Visualization API responses (tqx=out:json)
+ * - CSV with quotes, escaped quotes, newlines, and auto-detected delimiter
+ * - SheetJS XLSX/CSV fallbacks
+ */
+export function parseCSV(csvText: string): { data: Ticket[]; headers: string[]; rawCount: number } {
+  if (!csvText || typeof csvText !== 'string' || !csvText.trim()) {
+    return { data: [], headers: [], rawCount: 0 };
+  }
+
+  const trimmed = csvText.trim();
+
+  // 1. Check for Google Visualization JSON format
+  if (trimmed.includes('google.visualization') || trimmed.startsWith('/*O_o*/')) {
+    const gvizRes = parseGVizResponse(trimmed);
+    if (gvizRes.data.length > 0) {
+      return gvizRes;
+    }
+  }
+
+  // 2. Check for JSON format (Common for Google Apps Script Web App Webservice / REST APIs)
+  if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+    try {
+      const parsedJson = JSON.parse(trimmed);
+
+      // 2a. Direct array of objects: [{ nomorTiket: '...', ... }]
+      if (Array.isArray(parsedJson) && parsedJson.length > 0) {
+        if (typeof parsedJson[0] === 'object' && !Array.isArray(parsedJson[0])) {
+          const res = objectsToTickets(parsedJson);
+          if (res.data.length > 0) return res;
+        } else if (Array.isArray(parsedJson[0])) {
+          // 2D Array: [['Nomor Tiket', ...], ['T-01', ...]]
+          const res = rowsToTickets(parsedJson, 'json-2d');
+          if (res.data.length > 0) return res;
+        }
+      }
+
+      // 2b. Object wrapper: { data: [...] } or { records: [...] } or { tickets: [...] }
+      if (parsedJson && typeof parsedJson === 'object') {
+        const potentialArrays = [
+          parsedJson.data,
+          parsedJson.records,
+          parsedJson.tickets,
+          parsedJson.rows,
+          parsedJson.values,
+          parsedJson.result,
+          parsedJson.items,
+        ];
+
+        for (const arr of potentialArrays) {
+          if (Array.isArray(arr) && arr.length > 0) {
+            if (typeof arr[0] === 'object' && !Array.isArray(arr[0])) {
+              const res = objectsToTickets(arr);
+              if (res.data.length > 0) return res;
+            } else if (Array.isArray(arr[0])) {
+              const res = rowsToTickets(arr, 'json-wrapper-2d');
+              if (res.data.length > 0) return res;
+            }
+          }
+        }
+      }
+    } catch {
+      // Not valid JSON, continue with CSV parsing
+    }
+  }
+
+  // 3. Ultra-fast native CSV parser
+  try {
+    const delimiter = detectDelimiter(trimmed);
     const rows: string[][] = [];
     let currentRow: string[] = [];
     let currentCell = '';
     let insideQuotes = false;
-    const len = csvText.length;
+    const len = trimmed.length;
 
     for (let i = 0; i < len; i++) {
-      const char = csvText[i];
-      const nextChar = csvText[i + 1];
+      const char = trimmed[i];
+      const nextChar = trimmed[i + 1];
 
       if (char === '"') {
         if (insideQuotes && nextChar === '"') {
@@ -365,9 +519,9 @@ export function parseCSV(csvText: string): { data: Ticket[]; headers: string[]; 
     console.warn('Fast CSV parser warning, attempting SheetJS fallback:', err);
   }
 
-  // 2. Fallback to SheetJS (XLSX) if fast parser found no valid tickets
+  // 4. Fallback to SheetJS (XLSX) if fast parser found no valid tickets
   try {
-    const workbook = XLSX.read(csvText, { type: 'string', raw: false });
+    const workbook = XLSX.read(trimmed, { type: 'string', raw: false });
     const sheetName = workbook.SheetNames[0];
     if (sheetName) {
       const sheet = workbook.Sheets[sheetName];

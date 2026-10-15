@@ -788,25 +788,112 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     onProgress?.(20, 'Menghubungkan ke Google Sheet...');
 
     try {
-      onProgress?.(40, 'Mengunduh data spreadsheet melalui proxy...');
+      onProgress?.(35, 'Mengunduh data spreadsheet melalui proxy server...');
 
-      const res = await fetch('/api/proxy-sheet', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: targetUrl }),
-      });
+      let rawData: string = '';
+      let fetchError: string | null = null;
 
-      const json = await res.json();
+      // 1. Try server proxy endpoint first
+      try {
+        const res = await fetch('/api/proxy-sheet', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: targetUrl }),
+        });
 
-      if (!res.ok || !json.success) {
-        throw new Error(json.error || 'Gagal sinkronisasi dari Google Sheet');
+        const rawText = await res.text();
+        let json: any = null;
+
+        if (rawText && rawText.trim()) {
+          try {
+            json = JSON.parse(rawText);
+          } catch {
+            // rawText might be direct CSV or plaintext
+            if (res.ok && !rawText.trim().startsWith('<!DOCTYPE') && !rawText.trim().startsWith('<html')) {
+              rawData = rawText;
+            }
+          }
+        }
+
+        if (json && json.success && json.csv) {
+          rawData = json.csv;
+        } else if (json && json.error) {
+          fetchError = json.error;
+        } else if (!res.ok) {
+          fetchError = `Server proxy merespons HTTP ${res.status}: ${res.statusText || 'Terjadi gangguan jaringan'}`;
+        }
+      } catch (err: any) {
+        console.warn('Proxy fetch failed, attempting direct browser fetch:', err);
+        fetchError = err?.message || 'Gagal menghubungi server proxy';
+      }
+
+      // 2. Direct browser fetch fallback (for Google Apps Script Web Apps with CORS or public CSVs)
+      if (!rawData) {
+        onProgress?.(50, 'Mencoba koneksi langsung ke webservice/spreadsheet...');
+        try {
+          // Direct fetch
+          const directRes = await fetch(targetUrl, {
+            headers: { Accept: 'application/json, text/csv, text/plain, */*' },
+          });
+          const directText = await directRes.text();
+          if (
+            directRes.ok &&
+            directText.trim() &&
+            !directText.trim().startsWith('<!DOCTYPE') &&
+            !directText.trim().startsWith('<html')
+          ) {
+            rawData = directText;
+            fetchError = null;
+          }
+        } catch (directErr) {
+          console.warn('Direct fetch notice:', directErr);
+        }
+
+        // If direct fetch didn't work and URL is a standard Google Sheet, try client-side gviz URL
+        if (!rawData) {
+          const sheetIdMatch =
+            targetUrl.match(/\/spreadsheets(?:\/u\/\d+)?\/d\/([a-zA-Z0-9-_]+)/) ||
+            targetUrl.match(/[?&]id=([a-zA-Z0-9-_]+)/);
+          const gidMatch = targetUrl.match(/[#&?]gid=([0-9]+)/);
+          const gid = gidMatch ? gidMatch[1] : '0';
+
+          if (sheetIdMatch) {
+            const sheetId = sheetIdMatch[1];
+            try {
+              const gvizDirect = await fetch(
+                `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&gid=${gid}`
+              );
+              const gvizText = await gvizDirect.text();
+              if (
+                gvizDirect.ok &&
+                gvizText.trim() &&
+                !gvizText.trim().startsWith('<!DOCTYPE') &&
+                !gvizText.trim().startsWith('<html')
+              ) {
+                rawData = gvizText;
+                fetchError = null;
+              }
+            } catch {
+              // ignore
+            }
+          }
+        }
+      }
+
+      if (!rawData || !rawData.trim()) {
+        const detailedMsg =
+          fetchError ||
+          'Webservice atau Google Sheet mengembalikan data kosong (0 byte). Pastikan tautan aktif, Google Apps Script telah di-deploy dengan opsi "Who has access: Anyone", atau pengaturan Google Sheet diset ke "Anyone with the link can view".';
+        throw new Error(detailedMsg);
       }
 
       onProgress?.(65, 'Menganalisis baris data & memetakan 9 kolom standar...');
 
-      const parsed = parseCSV(json.csv);
+      const parsed = parseCSV(rawData);
       if (parsed.data.length === 0) {
-        throw new Error('Tidak ada baris data tiket valid yang dapat diimpor dari file tersebut.');
+        throw new Error(
+          'Tidak ada baris data tiket valid yang dapat diimpor dari tautan tersebut. Pastikan berkas memiliki header kolom atau data tiket (nomor tiket, isi keluhan, isi jawaban).'
+        );
       }
 
       onProgress?.(85, `Memproses ${parsed.data.length} tiket secara batch...`);
@@ -1040,9 +1127,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         }),
       });
 
-      const json = await res.json();
-      if (!res.ok || !json.success) {
-        throw new Error(json.error || 'Gagal melakukan penilaian otomatis AI');
+      const rawText = await res.text();
+      let json: any = null;
+      if (rawText && rawText.trim()) {
+        try {
+          json = JSON.parse(rawText);
+        } catch {
+          json = null;
+        }
+      }
+
+      if (!res.ok || !json?.success) {
+        throw new Error(json?.error || `Gagal melakukan penilaian otomatis AI (Status: ${res.status})`);
       }
 
       return {

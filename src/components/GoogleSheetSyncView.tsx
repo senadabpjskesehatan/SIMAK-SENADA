@@ -333,12 +333,22 @@ export const GoogleSheetSyncView: React.FC = () => {
       <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-2xs space-y-5">
         <form onSubmit={handleSyncGoogleSheet} className="space-y-4">
           <div>
-            <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-              <Link2 className="w-4 h-4 text-emerald-600" />
-              Tautan Spreadsheet Google Sheet Publik
-            </h3>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <Link2 className="w-4 h-4 text-emerald-600" />
+                Tautan Google Sheet Publik atau Webservice (Apps Script)
+              </h3>
+              <div className="flex items-center gap-1.5 text-[11px]">
+                <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-semibold border border-emerald-200">
+                  Google Sheet
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-semibold border border-blue-200">
+                  Webservice (JSON/CSV)
+                </span>
+              </div>
+            </div>
             <p className="text-xs text-slate-500 mt-0.5">
-              Masukkan link Google Sheet. Pastikan dokumen telah diatur ke <em>&quot;Siapa saja yang memiliki link dapat melihat&quot;</em>.
+              Masukkan tautan Google Sheet publik atau URL Webservice Google Apps Script (<code className="font-mono text-emerald-700">/exec</code>). Pastikan akses disetel ke <em>&quot;Siapa saja yang memiliki link (Anyone)&quot;</em>.
             </p>
           </div>
 
@@ -349,8 +359,8 @@ export const GoogleSheetSyncView: React.FC = () => {
                 required
                 value={inputUrl}
                 onChange={(e) => setInputUrl(e.target.value)}
-                placeholder="https://docs.google.com/spreadsheets/d/.../edit"
-                className="w-full px-3.5 py-2.5 text-xs rounded-xl border border-slate-300 bg-white focus:ring-2 focus:ring-emerald-500 font-mono"
+                placeholder="https://docs.google.com/spreadsheets/d/... atau https://script.google.com/macros/s/.../exec"
+                className="w-full px-3.5 py-2.5 text-xs rounded-xl border border-slate-300 bg-white focus:ring-2 focus:ring-emerald-500 font-mono shadow-2xs"
               />
             </div>
             <button
@@ -359,14 +369,33 @@ export const GoogleSheetSyncView: React.FC = () => {
               className="w-full sm:w-auto px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow-xs flex items-center justify-center gap-2 transition shrink-0 cursor-pointer"
             >
               <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
-              {isSyncing ? 'Menyinkronkan...' : 'Sinkronkan Google Sheet'}
+              {isSyncing ? 'Menyinkronkan...' : 'Sinkronkan Sekarang'}
             </button>
           </div>
 
-          <div className="p-3 bg-amber-50/80 border border-amber-200/80 rounded-xl text-[11px] text-amber-900 flex items-start gap-2.5">
-            <Info className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+          {/* Quick Guidance Box for Google Sheet & Webservice */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+            <div className="p-3 bg-emerald-50/70 border border-emerald-200/70 rounded-xl text-[11px] text-emerald-950 flex items-start gap-2.5">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+              <div>
+                <span className="font-bold text-emerald-900 block">Jika Menggunakan Link Google Sheet:</span>
+                Pastikan tombol <strong>Bagikan (Share)</strong> diubah ke <em>&quot;Siapa saja yang memiliki link&quot;</em> sebagai <em>Pelihat (Viewer)</em> agar dapat diakses oleh sistem.
+              </div>
+            </div>
+
+            <div className="p-3 bg-blue-50/70 border border-blue-200/70 rounded-xl text-[11px] text-blue-950 flex items-start gap-2.5">
+              <Info className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+              <div>
+                <span className="font-bold text-blue-900 block">Jika Menggunakan Webservice Apps Script:</span>
+                Buka editor Apps Script &gt; <strong>Deploy</strong> &gt; <strong>Manage deployments</strong> &gt; Edit &gt; Pastikan <em>Who has access</em> dipilih <strong>&quot;Anyone&quot; (Siapa saja)</strong> agar tidak diblokir halaman login Google.
+              </div>
+            </div>
+          </div>
+
+          <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-[11px] text-slate-600 flex items-start gap-2.5">
+            <Database className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
             <div>
-              <span className="font-bold">Ketentuan Sinkronisasi:</span> Sesuai kebijakan penjaminan mutu, input data wajib melalui sinkronisasi Google Sheet. Sinkronisasi ulang pada tautan yang sama akan mempertahankan catatan data penilaian sebelumnya dan hanya menambahkan data baru yang belum ada. Namun, jika terdapat tautan (link) Google Sheet baru yang disinkronkan, sistem akan otomatis mengganti data sebelumnya dengan data dari link baru tersebut.
+              <span className="font-bold text-slate-800">Prinsip Sinkronisasi:</span> Sinkronisasi ulang pada tautan yang sama akan mempertahankan data penilaian dan hanya menambahkan tiket baru yang belum ada. Apabila Anda memasukkan tautan baru, sistem akan menggantikan dataset lama dengan tiket dari tautan baru tersebut.
             </div>
           </div>
         </form>

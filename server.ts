@@ -270,12 +270,12 @@ Silakan berikan penilaian JSON untuk SEMUA ID indikator di atas!`;
   }
 });
 
-// Endpoint 2: Proxy to fetch Google Sheet CSV or public data to bypass CORS
+// Endpoint 2: Proxy to fetch Google Sheet CSV, Apps Script Webservice, or public data to bypass CORS
 app.post('/api/proxy-sheet', async (req, res) => {
   try {
     const { url } = req.body;
-    if (!url || typeof url !== 'string') {
-      return res.status(400).json({ error: 'URL Google Sheet tidak valid' });
+    if (!url || typeof url !== 'string' || !url.trim()) {
+      return res.status(400).json({ success: false, error: 'URL Google Sheet / Webservice tidak valid atau kosong' });
     }
 
     let targetUrl = url.trim();
@@ -283,19 +283,59 @@ app.post('/api/proxy-sheet', async (req, res) => {
     const gidMatch = targetUrl.match(/[#&?]gid=([0-9]+)/);
     const gid = gidMatch ? gidMatch[1] : '0';
 
-    // 1. If published web sheet (/spreadsheets/d/e/2PACX-...)
-    if (targetUrl.includes('/spreadsheets/d/e/')) {
+    const defaultHeaders = {
+      'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+      Accept: 'application/json, text/csv, text/plain, */*',
+    };
+
+    // 1. Google Apps Script Web App / Web Service (script.google.com/macros/s/.../exec)
+    if (targetUrl.includes('script.google.com') || targetUrl.includes('script.googleusercontent.com')) {
+      try {
+        const gasRes = await fetch(targetUrl, {
+          headers: defaultHeaders,
+          redirect: 'follow',
+          signal: AbortSignal.timeout(12000),
+        });
+
+        const gasText = await gasRes.text();
+
+        if (gasText.includes('accounts.google.com') || gasText.includes('ServiceLogin')) {
+          return res.status(403).json({
+            success: false,
+            error:
+              "Webservice Google Apps Script membutuhkan izin akses publik. Buka editor Google Apps Script > Klik 'Deploy' > 'Manage deployments' > Klik ikon Edit (pensil) > Ubah 'Who has access' (Siapa yang memiliki akses) menjadi 'Anyone' (Siapa saja), lalu Deploy kembali.",
+          });
+        }
+
+        if (!gasText.trim()) {
+          return res.status(400).json({
+            success: false,
+            error:
+              'Webservice Google Sheet mengembalikan respons kosong (0 byte). Pastikan fungsi doGet(e) di Google Apps Script mengembalikan data (misal: JSON atau CSV teks).',
+          });
+        }
+
+        csvData = gasText;
+      } catch (err: any) {
+        console.warn('Apps Script fetch error:', err);
+        return res.status(500).json({
+          success: false,
+          error: `Gagal menghubungi Webservice Google Apps Script: ${err?.message || 'Waktu tunggu habis (timeout)'}. Pastikan URL berakhiran /exec dan dapat diakses.`,
+        });
+      }
+    }
+    // 2. Published web sheet (/spreadsheets/d/e/2PACX-...)
+    else if (targetUrl.includes('/spreadsheets/d/e/')) {
       const pubMatch = targetUrl.match(/\/spreadsheets\/d\/e\/([a-zA-Z0-9-_]+)/);
       if (pubMatch) {
         const pubId = pubMatch[1];
         const pubUrl = `https://docs.google.com/spreadsheets/d/e/${pubId}/pub?output=csv&gid=${gid}`;
         try {
           const pubRes = await fetch(pubUrl, {
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-              Accept: 'text/csv,text/plain,*/*',
-            },
+            headers: defaultHeaders,
             redirect: 'follow',
+            signal: AbortSignal.timeout(9000),
           });
           const text = await pubRes.text();
           if (pubRes.ok && !text.trim().startsWith('<!DOCTYPE') && !text.trim().startsWith('<html')) {
@@ -306,29 +346,32 @@ app.post('/api/proxy-sheet', async (req, res) => {
           console.warn('pubCsv fetch notice:', e);
         }
       }
-    } else {
-      // 2. Standard Google Sheet URL
+    }
+    // 3. Standard Google Sheet URL (docs.google.com/spreadsheets/d/{id})
+    else {
       const sheetIdMatch =
         targetUrl.match(/\/spreadsheets(?:\/u\/\d+)?\/d\/([a-zA-Z0-9-_]+)/) ||
         targetUrl.match(/[?&]id=([a-zA-Z0-9-_]+)/);
 
       if (sheetIdMatch) {
         const sheetId = sheetIdMatch[1];
-        // gviz/tq endpoint is the fastest and most direct CSV exporter from Google Sheets
         const gvizUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&gid=${gid}`;
         const exportUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`;
 
-        // Try gviz first (fastest, no multi-hop redirect)
+        // Try gviz first (fastest, direct CSV exporter from Google Sheets)
         try {
           const gvizRes = await fetch(gvizUrl, {
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-              Accept: 'text/csv,text/plain,*/*',
-            },
+            headers: defaultHeaders,
             redirect: 'follow',
+            signal: AbortSignal.timeout(9000),
           });
           const gvizText = await gvizRes.text();
-          if (gvizRes.ok && !gvizText.trim().startsWith('<!DOCTYPE') && !gvizText.trim().startsWith('<html') && gvizText.length > 5) {
+          if (
+            gvizRes.ok &&
+            !gvizText.trim().startsWith('<!DOCTYPE') &&
+            !gvizText.trim().startsWith('<html') &&
+            gvizText.trim().length > 0
+          ) {
             csvData = gvizText;
             targetUrl = gvizUrl;
           }
@@ -340,14 +383,17 @@ app.post('/api/proxy-sheet', async (req, res) => {
         if (!csvData) {
           try {
             const expRes = await fetch(exportUrl, {
-              headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                Accept: 'text/csv,text/plain,*/*',
-              },
+              headers: defaultHeaders,
               redirect: 'follow',
+              signal: AbortSignal.timeout(9000),
             });
             const expText = await expRes.text();
-            if (expRes.ok && !expText.trim().startsWith('<!DOCTYPE') && !expText.trim().startsWith('<html') && expText.length > 5) {
+            if (
+              expRes.ok &&
+              !expText.trim().startsWith('<!DOCTYPE') &&
+              !expText.trim().startsWith('<html') &&
+              expText.trim().length > 0
+            ) {
               csvData = expText;
               targetUrl = exportUrl;
             }
@@ -355,18 +401,38 @@ app.post('/api/proxy-sheet', async (req, res) => {
             console.warn('export fetch notice:', e);
           }
         }
+
+        // Also try GViz JSON export if CSV export was blocked
+        if (!csvData) {
+          try {
+            const jsonGvizUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&gid=${gid}`;
+            const gvizJsonRes = await fetch(jsonGvizUrl, {
+              headers: defaultHeaders,
+              redirect: 'follow',
+              signal: AbortSignal.timeout(9000),
+            });
+            const gvizJsonText = await gvizJsonRes.text();
+            if (
+              gvizJsonRes.ok &&
+              (gvizJsonText.includes('google.visualization') || gvizJsonText.startsWith('/*O_o*/'))
+            ) {
+              csvData = gvizJsonText;
+              targetUrl = jsonGvizUrl;
+            }
+          } catch (e) {
+            console.warn('gviz json fetch notice:', e);
+          }
+        }
       }
     }
 
-    // Direct fallback if URL was already a direct CSV download
+    // Direct fallback if URL was already a direct CSV/JSON download or API endpoint
     if (!csvData) {
       try {
         const directRes = await fetch(targetUrl, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            Accept: 'text/csv,text/plain,*/*',
-          },
+          headers: defaultHeaders,
           redirect: 'follow',
+          signal: AbortSignal.timeout(10000),
         });
         const directText = await directRes.text();
         if (directRes.ok && !directText.trim().startsWith('<!DOCTYPE') && !directText.trim().startsWith('<html')) {
@@ -378,20 +444,37 @@ app.post('/api/proxy-sheet', async (req, res) => {
     }
 
     // Verification check for permissions / HTML error page
-    if (!csvData || csvData.trim().startsWith('<!DOCTYPE') || csvData.trim().startsWith('<html') || csvData.includes('accounts.google.com')) {
-      return res.status(403).json({
-        error: "Google Sheet membutuhkan izin akses publik. Pastikan pengaturan Berbagi di Google Sheet telah diubah menjadi 'Siapa saja yang memiliki link' (Anyone with the link can view) sebagai Pelihat (Viewer), atau gunakan opsi 'Unggah Berkas Excel (.xlsx)' secara langsung.",
+    if (!csvData || !csvData.trim()) {
+      return res.status(400).json({
+        success: false,
+        error:
+          "Server tidak menerima data (respons kosong). Pastikan link Google Sheet atau Webservice dapat diakses secara publik atau gunakan opsi 'Unggah Berkas Excel (.xlsx)' secara langsung.",
       });
     }
 
-    res.json({
+    if (
+      csvData.trim().startsWith('<!DOCTYPE') ||
+      csvData.trim().startsWith('<html') ||
+      csvData.includes('accounts.google.com')
+    ) {
+      return res.status(403).json({
+        success: false,
+        error:
+          "Google Sheet membutuhkan izin akses publik. Pastikan pengaturan Berbagi di Google Sheet telah diubah menjadi 'Siapa saja yang memiliki link' (Anyone with the link can view) sebagai Pelihat (Viewer), atau jika menggunakan Webservice Apps Script pastikan 'Who has access' diset ke 'Anyone'.",
+      });
+    }
+
+    return res.json({
       success: true,
       csv: csvData,
       resolvedUrl: targetUrl,
     });
   } catch (error: any) {
     console.error('Error proxy-sheet:', error);
-    res.status(500).json({ error: error?.message || 'Gagal mengambil data dari Google Sheet' });
+    return res.status(500).json({
+      success: false,
+      error: error?.message || 'Gagal mengambil data dari Google Sheet atau Webservice',
+    });
   }
 });
 
