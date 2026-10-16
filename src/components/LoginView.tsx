@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { ShieldCheck, Lock, Mail, Eye, EyeOff, AlertCircle, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { ShieldCheck, Lock, Mail, Eye, EyeOff, AlertCircle, ArrowRight, CheckCircle2, Clock } from 'lucide-react';
 
 export const LoginView: React.FC = () => {
-  const { login } = useApp();
+  const { login, sessionExpiredMessage, clearSessionExpiredMessage } = useApp();
   const [usernameInput, setUsernameInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -13,6 +13,7 @@ export const LoginView: React.FC = () => {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage('');
+    clearSessionExpiredMessage();
 
     if (!usernameInput.trim()) {
       setErrorMessage('Silakan masukkan username, email, atau NIP Anda.');
@@ -95,6 +96,13 @@ export const LoginView: React.FC = () => {
 
             {/* Form */}
             <form onSubmit={handleSubmit} className="px-6 sm:px-8 py-6 space-y-4">
+              {sessionExpiredMessage && !errorMessage && (
+                <div className="p-3.5 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-start gap-2.5 text-xs text-amber-200 animate-in fade-in duration-200">
+                  <Clock className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <div className="leading-snug">{sessionExpiredMessage}</div>
+                </div>
+              )}
+
               {errorMessage && (
                 <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-start gap-2.5 text-xs text-rose-300 animate-in fade-in duration-200">
                   <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
@@ -174,10 +182,14 @@ export const LoginView: React.FC = () => {
             </form>
 
             {/* Security Notice Footer */}
-            <div className="px-6 py-4 bg-slate-900/60 border-t border-slate-850 text-center">
+            <div className="px-6 py-4 bg-slate-900/60 border-t border-slate-850 text-center space-y-1">
               <p className="text-[11px] text-slate-400 leading-relaxed">
                 Akses portal ini hanya diperuntukkan bagi pegawai dan pengelola mutu yang berwenang di lingkungan BPJS Kesehatan.
               </p>
+              <div className="flex items-center justify-center gap-1.5 text-[10px] text-teal-400 font-medium">
+                <Clock className="w-3 h-3 text-teal-400" />
+                <span>Sesi dibatasi maksimal 60 menit & otomatis logout saat browser ditutup</span>
+              </div>
             </div>
           </div>
 

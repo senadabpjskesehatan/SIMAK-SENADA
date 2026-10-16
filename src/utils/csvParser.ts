@@ -32,11 +32,13 @@ export function normalizeColumnKey(header: string): string {
     return 'tanggalTiket';
   }
 
-  // 3. Kategori
+  // 3. Kategori (Informasi, Permintaan, Pengaduan)
   if (
-    clean.includes('kategori') || clean.includes('category') || clean.includes('jenis') ||
-    clean === 'tipe' || clean === 'klasifikasi' || clean === 'jenispelayanan' || clean === 'tipetiket' ||
-    clean === 'kanal' || clean === 'saluran' || clean === 'media'
+    clean === 'kategori' || clean === 'category' || clean === 'kategoritiket' || clean === 'kategorilayanan' ||
+    clean === 'jenistiket' || clean === 'jenispelayanan' || clean === 'klasifikasi' || clean === 'tipe' || clean === 'tipetiket' ||
+    (clean.includes('kategori') && !clean.includes('sub') && !clean.includes('pokok')) ||
+    (clean.includes('category') && !clean.includes('sub')) ||
+    (clean.includes('jenis') && !clean.includes('sub') && !clean.includes('pokok'))
   ) {
     return 'kategori';
   }
@@ -46,7 +48,7 @@ export function normalizeColumnKey(header: string): string {
     clean.includes('pokok') || clean.includes('mainissue') || clean.includes('rootcause') ||
     clean === 'masalah' || clean === 'permasalahan' || clean === 'pokokpermasalahan' ||
     clean === 'substansi' || clean === 'hal' || clean === 'isu' || clean === 'isumasalah' ||
-    clean === 'topikutama' || clean === 'kategori1' || clean === 'pokokmasalahpengaduan'
+    clean === 'topikutama' || clean === 'pokokmasalahpengaduan'
   ) {
     return 'pokokMasalah';
   }
@@ -55,7 +57,7 @@ export function normalizeColumnKey(header: string): string {
   if (
     clean.includes('topik') || clean.includes('subissue') || clean.includes('subkategori') ||
     clean === 'subtopik' || clean === 'submasalah' || clean === 'rincianmasalah' ||
-    clean === 'detailmasalah' || clean === 'subkategorimasalah' || clean === 'kategori2' ||
+    clean === 'detailmasalah' || clean === 'subkategorimasalah' ||
     clean === 'rincian' || clean === 'sub'
   ) {
     return 'topikMasalah';
@@ -196,6 +198,37 @@ export function detectDelimiter(text: string): string {
 }
 
 /**
+ * Normalizes any category string into the official 3 BPJS categories:
+ * 'Informasi' | 'Permintaan' | 'Pengaduan'
+ */
+export function cleanCategory(val: any): string {
+  if (!val) return 'Informasi';
+  const str = String(val).trim();
+  const lower = str.toLowerCase();
+
+  // 1. Direct exact matches
+  if (lower === 'permintaan') return 'Permintaan';
+  if (lower === 'informasi') return 'Informasi';
+  if (lower === 'pengaduan') return 'Pengaduan';
+
+  // 2. StartsWith match (e.g. Permintaan Pelayanan, Pengaduan Tarif)
+  if (lower.startsWith('permintaan') || lower.startsWith('permohonan')) return 'Permintaan';
+  if (lower.startsWith('pengaduan') || lower.startsWith('keluhan') || lower.startsWith('komplain')) return 'Pengaduan';
+  if (lower.startsWith('informasi') || lower.startsWith('info')) return 'Informasi';
+
+  // 3. Includes keyword match
+  if (lower.includes('minta') || lower.includes('request') || lower.includes('permohonan')) return 'Permintaan';
+  if (lower.includes('aduan') || lower.includes('keluh') || lower.includes('komplain') || lower.includes('complaint')) return 'Pengaduan';
+  if (lower.includes('info')) return 'Informasi';
+
+  if (str) {
+    return str.charAt(0).toUpperCase() + str.slice(1);
+  }
+
+  return 'Informasi';
+}
+
+/**
  * Converts 2D array of rows (first row is headers) into structured Ticket list
  */
 export function rowsToTickets(
@@ -235,8 +268,7 @@ export function rowsToTickets(
       } else if (key === 'tanggalTiket') {
         item.tanggalTiket = normalizeDate(val);
       } else if (key === 'kategori') {
-        const catStr = String(val || '').trim();
-        item.kategori = catStr.toLowerCase().includes('pengaduan') ? 'Pengaduan' : 'Informasi';
+        item.kategori = cleanCategory(val);
       } else if (key === 'pokokMasalah') {
         item.pokokMasalah = String(val || '').trim();
       } else if (key === 'topikMasalah') {
@@ -283,7 +315,7 @@ export function rowsToTickets(
       tickets.push({
         nomorTiket: item.nomorTiket,
         tanggalTiket: item.tanggalTiket || new Date().toISOString().slice(0, 10),
-        kategori: item.kategori || 'Pengaduan',
+        kategori: cleanCategory(item.kategori || 'Informasi'),
         pokokMasalah: item.pokokMasalah || 'Pelayanan Faskes',
         topikMasalah: item.topikMasalah || 'Layanan Umum',
         isiKeluhan: item.isiKeluhan || 'Pertanyaan/keluhan peserta belum terisi lengkap dalam baris spreadsheet.',
@@ -342,8 +374,7 @@ export function objectsToTickets(
     const namaPetugas = String(
       mapped.namaPetugas || item.petugas || item.agent || item.cs || 'Petugas Layanan'
     ).trim();
-    const kategoriStr = String(mapped.kategori || item.jenis || '').toLowerCase();
-    const kategori = kategoriStr.includes('pengaduan') ? 'Pengaduan' : 'Informasi';
+    const kategori = cleanCategory(mapped.kategori || item.jenis || '');
 
     if (isiKeluhan || isiJawaban || mapped.pokokMasalah || mapped.namaPetugas || mapped.nomorTiket) {
       tickets.push({
@@ -587,5 +618,11 @@ export async function parseExcelFile(
 export function generateSampleGoogleSheetCSV(): string {
   return [
     'nomor tiket,tanggal tiket,kategori,pokok masalah,topik masalah,isi keluhan,isi jawaban,rating,nama petugas',
+    'TKT-2025-0001,2025-01-10,Informasi,Pelayanan Faskes,Syarat Pendaftaran Faskes Tingkat Pertama,Peserta menanyakan persyaratan pendaftaran fasilitas kesehatan tingkat pertama bagi peserta baru mandiri.,Petugas menjelaskan berkas persyaratan meliputi KTP dan KK serta memilih faskes terdekat melalui aplikasi Mobile JKN.,5,DINDA MUTIA HIDAYATI',
+    'TKT-2025-0002,2025-01-11,Permintaan,Perubahan Data,Penambahan Anggota Keluarga Bayi Baru Lahir,Peserta mengajukan permohonan pendaftaran bayi baru lahir untuk dimasukkan ke dalam kartu keluarga BPJS Kesehatan.,Petugas memverifikasi surat keterangan lahir dan NIK ibu kandung serta memproses penambahan anggota keluarga.,5,WIDURI PUTRI NINGSIH',
+    'TKT-2025-0003,2025-01-12,Pengaduan,Antrean Faskes,Kendala Antrean Poli Spesialis di Rumah Sakit,Peserta mengeluhkan waktu tunggu antrean poli spesialis penyakit dalam yang melebihi 3 jam tanpa kejelasan.,Petugas segera berkoordinasi dengan petugas BPJS Satu di RS terkait untuk percepatan pemanggilan antrean peserta.,4,PUTRI VADIA DHAMAYANTI',
+    'TKT-2025-0004,2025-01-13,Informasi,Iuran & Pembayaran,Tata Cara Pembayaran Autodebet Bank,Peserta menanyakan cara mengaktifkan autodebet pembayaran iuran BPJS Kesehatan melalui Bank Mandiri.,Petugas memberikan panduan langkah pendaftaran autodebet melalui menu Mobile JKN dan mesin ATM.,5,DINDA MUTIA HIDAYATI',
+    'TKT-2025-0005,2025-01-14,Permintaan,Administrasi Kepesertaan,Perubahan Fasilitas Kesehatan Tingkat Pertama,Peserta mengajukan permohonan pindah Faskes Tingkat Pertama karena telah berpindah domisili tempat tinggal.,Petugas memvalidasi data kepesertaan dan memproses perubahan FKTP yang mulai berlaku per tanggal 1 bulan berikutnya.,5,WIDURI PUTRI NINGSIH',
+    'TKT-2025-0006,2025-01-15,Pengaduan,Klaim & Biaya,Tagihan Iur Biaya Tambahan Obat di Rumah Sakit,Peserta rawat inap mengeluhkan diminta membeli obat di luar rumah sakit padahal masuk dalam plafon JKN.,Petugas melakukan konfirmasi ke instalasi farmasi rumah sakit dan memastikan obat dijamin penuh tanpa iur biaya.,4,PUTRI VADIA DHAMAYANTI',
   ].join('\n');
 }

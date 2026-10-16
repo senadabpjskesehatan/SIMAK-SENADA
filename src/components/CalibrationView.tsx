@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { useApp } from '../context/AppContext';
 import { SamplingEvaluation, IndicatorScore, CalibrationRecord } from '../types';
 import {
@@ -41,12 +41,13 @@ export const CalibrationView: React.FC = () => {
   } = useApp();
 
   // Sub-tabs: 'isi' | 'history' | 'dashboard'
-  // If role is QA, default to dashboard since QA can't perform calibration (only Admin & Pusat)
-  const isQA = currentUser?.role === 'qa';
+  // QA has access to History Kalibrasi and Dashboard Kalibrasi (Isi Kalibrasi is reserved for Admin & Pusat)
+  const isQA = currentUser?.role === 'qa' || (currentUser?.role as string) === 'quality_assurance';
   const canPerformCalibration = currentUser?.role === 'admin' || currentUser?.role === 'pusat';
+  const canViewHistory = canPerformCalibration || isQA;
 
   const [activeSubTab, setActiveSubTab] = useState<'isi' | 'history' | 'dashboard'>(
-    canPerformCalibration ? 'isi' : 'dashboard'
+    canPerformCalibration ? 'isi' : 'history'
   );
 
   // Calibration Form State (Sub-tab: Isi Kalibrasi)
@@ -67,12 +68,76 @@ export const CalibrationView: React.FC = () => {
   // History detail inspection modal
   const [selectedHistoryItem, setSelectedHistoryItem] = useState<CalibrationRecord | null>(null);
 
-  // Filtered History List (by user / search)
-  const filteredHistoryList = useMemo(() => {
-    return calibrations.filter((item) => {
-      if (historyCalibratorFilter !== 'all' && item.calibratorId !== historyCalibratorFilter) {
-        return false;
+  // Helper: check if a calibration record was assessed/sampled by the current QA officer
+  const isRecordForCurrentQA = useCallback(
+    (item: CalibrationRecord) => {
+      if (!currentUser) return false;
+      const currentId = (currentUser.id || '').trim().toLowerCase();
+      const currentUsername = (currentUser.username || '').trim().toLowerCase();
+      const currentName = (currentUser.name || '').trim().toLowerCase();
+      const currentNip = (currentUser.nip || '').trim().toLowerCase();
+
+      const itemQaId = (item.qaId || '').trim().toLowerCase();
+      const itemQaName = (item.qaName || '').trim().toLowerCase();
+
+      if (currentId && itemQaId === currentId) return true;
+      if (currentUsername && itemQaId === currentUsername) return true;
+      if (currentNip && (itemQaId === currentNip || itemQaName.includes(currentNip))) return true;
+      if (currentName && (itemQaName === currentName || itemQaName.includes(currentName) || currentName.includes(itemQaName))) return true;
+
+      return false;
+    },
+    [currentUser]
+  );
+
+  // Calibrations strictly belonging to this QA user (if user is QA)
+  const qaCalibrations = useMemo(() => {
+    if (!isQA) return calibrations;
+    return calibrations.filter(isRecordForCurrentQA);
+  }, [calibrations, isQA, isRecordForCurrentQA]);
+
+  // List of unique calibrators who calibrated this QA's tickets
+  const qaCalibrators = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; role: string; count: number }>();
+    qaCalibrations.forEach((c) => {
+      const existing = map.get(c.calibratorId);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        map.set(c.calibratorId, {
+          id: c.calibratorId,
+          name: c.calibratorName,
+          role: c.calibratorRole,
+          count: 1,
+        });
       }
+    });
+    return Array.from(map.values());
+  }, [qaCalibrations]);
+
+  // Filtered History List (strictly restricted to QA user if role is QA)
+  const filteredHistoryList = useMemo(() => {
+    // If role is QA, the pool is strictly restricted to this QA officer's records only
+    const baseList = isQA ? qaCalibrations : calibrations;
+
+    return baseList.filter((item) => {
+      if (isQA) {
+        // Enforce QA identity check
+        if (!isRecordForCurrentQA(item)) return false;
+
+        // If QA specifically selected a calibrator filter
+        if (historyCalibratorFilter !== 'all' && item.calibratorId !== historyCalibratorFilter) {
+          return false;
+        }
+      } else {
+        // Admin or Pusat
+        if (historyCalibratorFilter === 'my_calibrations') {
+          if (item.calibratorId !== currentUser?.id) return false;
+        } else if (historyCalibratorFilter !== 'all' && item.calibratorId !== historyCalibratorFilter) {
+          return false;
+        }
+      }
+
       if (historySearch.trim()) {
         const q = historySearch.toLowerCase();
         const matches =
@@ -81,12 +146,13 @@ export const CalibrationView: React.FC = () => {
           item.qaName.toLowerCase().includes(q) ||
           item.calibratorName.toLowerCase().includes(q) ||
           item.ticket.kategori.toLowerCase().includes(q) ||
-          item.ticket.pokokMasalah.toLowerCase().includes(q);
+          item.ticket.pokokMasalah.toLowerCase().includes(q) ||
+          (item.catatanKalibrasi && item.catatanKalibrasi.toLowerCase().includes(q));
         if (!matches) return false;
       }
       return true;
     });
-  }, [calibrations, historyCalibratorFilter, historySearch]);
+  }, [calibrations, qaCalibrations, isQA, isRecordForCurrentQA, historyCalibratorFilter, historySearch, currentUser]);
 
   // --- SUBTAB 1: ISI KALIBRASI HANDLERS ---
   const handleStartCalibration = (item: SamplingEvaluation) => {
@@ -188,6 +254,7 @@ export const CalibrationView: React.FC = () => {
 
   // --- SUBTAB 2: HISTORY KALIBRASI EXPORT ---
   const handleExportHistoryCSV = () => {
+    const listToExport = filteredHistoryList;
     const headers = [
       'ID Kalibrasi',
       'No. Tiket',
@@ -203,11 +270,11 @@ export const CalibrationView: React.FC = () => {
       'Catatan Kalibrasi',
     ];
 
-    const rows = filteredCalibrations.map((c) => [
+    const rows = listToExport.map((c) => [
       `"${c.id}"`,
       `"${c.nomorTiket}"`,
       `"${c.tanggalKalibrasi}"`,
-      `"${c.ticket.namaPetugas}"`,
+      `"${c.ticket?.namaPetugas || ''}"`,
       `"${c.qaName}"`,
       `"${c.calibratorName}"`,
       `"${c.calibratorRole}"`,
@@ -215,7 +282,7 @@ export const CalibrationView: React.FC = () => {
       c.nilaiKalibrasi,
       c.selisihNilai,
       `${c.persentaseKesesuaian}%`,
-      `"${c.catatanKalibrasi}"`,
+      `"${(c.catatanKalibrasi || '').replace(/"/g, '""')}"`,
     ]);
 
     const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
@@ -223,40 +290,73 @@ export const CalibrationView: React.FC = () => {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.setAttribute('href', url);
-    link.setAttribute('download', `rekap_history_kalibrasi_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.setAttribute(
+      'download',
+      isQA
+        ? `histori_kalibrasi_qa_${currentUser?.username || 'user'}_${new Date().toISOString().slice(0, 10)}.csv`
+        : `rekap_history_kalibrasi_${new Date().toISOString().slice(0, 10)}.csv`
+    );
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
 
   // --- SUBTAB 3: DASHBOARD KALIBRASI AGGREGATES ---
-  // Unique filter lists
+  // Unique filter lists (cascading)
   const filterOptions = useMemo(() => {
-    const petugasSet = new Set<string>();
-    const qaSet = new Set<string>();
-    const kategoriSet = new Set<string>();
-    const pokokSet = new Set<string>();
-    const topikSet = new Set<string>();
+    const baseSource = isQA ? qaCalibrations : calibrations;
 
-    calibrations.forEach((c) => {
-      if (c.ticket.namaPetugas) petugasSet.add(c.ticket.namaPetugas);
-      if (c.qaName) qaSet.add(c.qaName);
-      if (c.ticket.kategori) kategoriSet.add(c.ticket.kategori);
-      if (c.ticket.pokokMasalah) pokokSet.add(c.ticket.pokokMasalah);
-      if (c.ticket.topikMasalah) topikSet.add(c.ticket.topikMasalah);
-    });
+    const matches = (c: CalibrationRecord, key: keyof typeof calibrationFilters) => {
+      // Check if this record matches all OTHER filters
+      for (const [filterKey, filterValue] of Object.entries(calibrationFilters)) {
+        if (filterKey !== key && filterValue !== 'all') {
+          if (filterKey === 'kategori' && c.ticket.kategori !== filterValue) return false;
+          if (filterKey === 'namaPetugas' && c.ticket.namaPetugas !== filterValue) return false;
+          if (filterKey === 'pokokMasalah' && c.ticket.pokokMasalah !== filterValue) return false;
+          if (filterKey === 'topikMasalah' && c.ticket.topikMasalah !== filterValue) return false;
+          if (filterKey === 'periode') {
+              // Handle periode filter... (might need to match date)
+              // Keeping it simple for now, as it might not be relevant for categorical filters
+          }
+        }
+      }
+      return true;
+    };
+
+    const getOptions = (key: keyof typeof calibrationFilters, mapper: (c: CalibrationRecord) => string | undefined) => {
+      const set = new Set<string>();
+      baseSource.forEach((c) => {
+        if (matches(c, key)) {
+          const val = mapper(c);
+          if (val) set.add(val);
+        }
+      });
+      const arr = Array.from(set);
+      if (key === 'kategori') {
+          return arr.sort((a, b) => {
+              const order: Record<string, number> = { 'Informasi': 1, 'Permintaan': 2, 'Pengaduan': 3 };
+              return (order[a] || 4) - (order[b] || 4);
+          });
+      }
+      return arr.sort();
+    };
 
     return {
-      petugas: Array.from(petugasSet).sort(),
-      qa: Array.from(qaSet).sort(),
-      kategori: Array.from(kategoriSet).sort(),
-      pokok: Array.from(pokokSet).sort(),
-      topik: Array.from(topikSet).sort(),
+      petugas: getOptions('namaPetugas', (c) => c.ticket.namaPetugas),
+      qa: getOptions('namaPetugas', (c) => c.qaName), // Note: qa filter doesn't exist in calibrationFilters, but this is used for something else?
+      kategori: getOptions('kategori', (c) => c.ticket.kategori),
+      pokok: getOptions('pokokMasalah', (c) => c.ticket.pokokMasalah),
+      topik: getOptions('topikMasalah', (c) => c.ticket.topikMasalah),
     };
-  }, [calibrations]);
+  }, [calibrations, qaCalibrations, isQA, calibrationFilters]);
+
+  const dashboardList = useMemo(() => {
+    if (!isQA) return filteredCalibrations;
+    return filteredCalibrations.filter(isRecordForCurrentQA);
+  }, [filteredCalibrations, isQA, isRecordForCurrentQA]);
 
   const dashboardMetrics = useMemo(() => {
-    const list = filteredCalibrations;
+    const list = dashboardList;
     if (list.length === 0) {
       return {
         avgKesesuaian: 0,
@@ -295,7 +395,7 @@ export const CalibrationView: React.FC = () => {
       medSyncCount: med,
       lowSyncCount: low,
     };
-  }, [filteredCalibrations]);
+  }, [dashboardList]);
 
   // Indicator alignment breakdown (QA vs Kalibrator GAP per indicator)
   const indicatorAlignment = useMemo(() => {
@@ -389,7 +489,7 @@ export const CalibrationView: React.FC = () => {
             </button>
           )}
 
-          {canPerformCalibration && (
+          {canViewHistory && (
             <button
               onClick={() => setActiveSubTab('history')}
               className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition ${
@@ -399,9 +499,9 @@ export const CalibrationView: React.FC = () => {
               }`}
             >
               <History className="w-4 h-4" />
-              2. History Kalibrasi
+              {canPerformCalibration ? '2. History Kalibrasi' : 'Histori Kalibrasi'}
               <span className="ml-1 text-[10px] bg-white/20 text-white px-1.5 py-0.2 rounded-full">
-                {calibrations.length}
+                {isQA ? qaCalibrations.length : calibrations.length}
               </span>
             </button>
           )}
@@ -833,18 +933,29 @@ export const CalibrationView: React.FC = () => {
       )}
 
       {/* ======================================================================== */}
-      {/* SUB-MENU 2: HISTORY KALIBRASI (Admin & Pusat)                             */}
+      {/* SUB-MENU 2: HISTORY KALIBRASI (Admin, Pusat, & Quality Assurance)          */}
       {/* ======================================================================== */}
-      {activeSubTab === 'history' && canPerformCalibration && (
+      {activeSubTab === 'history' && canViewHistory && (
         <div className="space-y-4">
           <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-2xs space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
-                <h3 className="text-sm font-bold text-slate-900">
-                  Riwayat & Hasil Kalibrasi Penilaian Mutu ({calibrations.length} Tiket)
-                </h3>
-                <p className="text-xs text-slate-500">
-                  Daftar seluruh tiket sampling QA yang telah dilakukan kalibrasi oleh masing-masing user Admin atau Pusat
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-sm font-bold text-slate-900">
+                    {isQA
+                      ? `Histori Kalibrasi Mutu Saya (${qaCalibrations.length} Tiket)`
+                      : `Riwayat & Hasil Kalibrasi Penilaian Mutu (${calibrations.length} Tiket)`}
+                  </h3>
+                  {isQA && (
+                    <span className="text-[11px] bg-purple-100 text-purple-800 font-semibold px-2.5 py-0.5 rounded-full border border-purple-200">
+                      Petugas QA: {currentUser?.name}
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-500 mt-1">
+                  {isQA
+                    ? `Daftar riwayat kalibrasi mutu khusus hasil sampling tiket yang dinilai oleh Anda (${currentUser?.name}), dikalibrasi oleh Admin atau Pimpinan Pusat.`
+                    : 'Daftar seluruh tiket sampling QA yang telah dilakukan kalibrasi oleh masing-masing user Admin atau Pusat'}
                 </p>
               </div>
 
@@ -853,7 +964,7 @@ export const CalibrationView: React.FC = () => {
                 className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold shadow-xs flex items-center gap-2 transition shrink-0"
               >
                 <Download className="w-3.5 h-3.5" />
-                Ekspor Riwayat Kalibrasi CSV
+                {isQA ? 'Ekspor Histori Kalibrasi Saya CSV' : 'Ekspor Riwayat Kalibrasi CSV'}
               </button>
             </div>
 
@@ -862,29 +973,61 @@ export const CalibrationView: React.FC = () => {
               <div className="flex flex-wrap items-center gap-3">
                 <div className="flex items-center gap-1.5 font-semibold text-slate-600">
                   <Filter className="w-3.5 h-3.5 text-purple-700" />
-                  <span>Filter Kalibrator:</span>
+                  <span>Filter:</span>
                 </div>
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => setHistoryCalibratorFilter('all')}
-                    className={`px-3 py-1 rounded-lg text-xs font-medium transition ${
-                      historyCalibratorFilter === 'all'
-                        ? 'bg-purple-700 text-white font-bold'
-                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                    }`}
-                  >
-                    Semua ({calibrations.length})
-                  </button>
-                  <button
-                    onClick={() => setHistoryCalibratorFilter(currentUser.id)}
-                    className={`px-3 py-1 rounded-lg text-xs font-medium transition ${
-                      historyCalibratorFilter === currentUser.id
-                        ? 'bg-purple-700 text-white font-bold'
-                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                    }`}
-                  >
-                    Oleh Saya ({currentUser.name}) ({calibrations.filter((c) => c.calibratorId === currentUser.id).length})
-                  </button>
+                <div className="flex flex-wrap items-center gap-1">
+                  {isQA ? (
+                    <>
+                      <button
+                        onClick={() => setHistoryCalibratorFilter('all')}
+                        className={`px-3 py-1 rounded-lg text-xs font-medium transition ${
+                          historyCalibratorFilter === 'all'
+                            ? 'bg-purple-700 text-white font-bold'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        Semua Hasil Kalibrasi Saya ({qaCalibrations.length})
+                      </button>
+                      {qaCalibrators.map((cal) => (
+                        <button
+                          key={cal.id}
+                          onClick={() => setHistoryCalibratorFilter(cal.id)}
+                          className={`px-3 py-1 rounded-lg text-xs font-medium transition ${
+                            historyCalibratorFilter === cal.id
+                              ? 'bg-purple-700 text-white font-bold'
+                              : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                          }`}
+                        >
+                          Dikalibrasi: {cal.name} ({cal.count})
+                        </button>
+                      ))}
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => setHistoryCalibratorFilter('all')}
+                        className={`px-3 py-1 rounded-lg text-xs font-medium transition ${
+                          historyCalibratorFilter === 'all'
+                            ? 'bg-purple-700 text-white font-bold'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        Semua ({calibrations.length})
+                      </button>
+                      {canPerformCalibration && (
+                        <button
+                          onClick={() => setHistoryCalibratorFilter(currentUser?.id || '')}
+                          className={`px-3 py-1 rounded-lg text-xs font-medium transition ${
+                            historyCalibratorFilter === currentUser?.id
+                              ? 'bg-purple-700 text-white font-bold'
+                              : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                          }`}
+                        >
+                          Oleh Saya ({currentUser?.name}) ({calibrations.filter((c) => c.calibratorId === currentUser?.id).length})
+                        </button>
+                      )}
+                    </>
+                  )}
                 </div>
               </div>
 
@@ -894,20 +1037,32 @@ export const CalibrationView: React.FC = () => {
                   type="text"
                   value={historySearch}
                   onChange={(e) => setHistorySearch(e.target.value)}
-                  placeholder="Cari no tiket, nama petugas, QA..."
+                  placeholder={
+                    isQA
+                      ? 'Cari no tiket, nama petugas, kalibrator...'
+                      : 'Cari no tiket, nama petugas, QA, kalibrator...'
+                  }
                   className="w-full pl-9 pr-3 py-1.5 text-xs rounded-lg border border-slate-200 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-purple-500"
                 />
               </div>
             </div>
           </div>
 
-          {calibrations.length === 0 ? (
+          {isQA && qaCalibrations.length === 0 ? (
+            <div className="bg-white rounded-xl border border-slate-200 p-12 text-center text-slate-400 text-xs space-y-2">
+              <ShieldCheck className="w-10 h-10 text-purple-300 mx-auto" />
+              <div className="font-bold text-slate-700 text-sm">Belum Ada Histori Kalibrasi untuk Anda</div>
+              <p className="max-w-md mx-auto text-slate-500">
+                Belum ada tiket hasil sampling penilaian mutu Anda ({currentUser?.name}) yang telah dikalibrasi oleh Admin atau Pimpinan Pusat.
+              </p>
+            </div>
+          ) : !isQA && calibrations.length === 0 ? (
             <div className="bg-white rounded-xl border border-slate-200 p-12 text-center text-slate-400 text-xs">
               Belum ada riwayat kalibrasi yang dilakukan. Silakan buka menu <strong>Isi Kalibrasi</strong> untuk mulai mengkalibrasi.
             </div>
           ) : filteredHistoryList.length === 0 ? (
             <div className="bg-white rounded-xl border border-slate-200 p-12 text-center text-slate-400 text-xs">
-              Tidak ada data riwayat kalibrasi yang sesuai dengan filter kalibrator atau pencarian kata kunci.
+              Tidak ada data riwayat kalibrasi yang sesuai dengan filter atau kata kunci pencarian.
             </div>
           ) : (
             <div className="space-y-3">
@@ -935,6 +1090,11 @@ export const CalibrationView: React.FC = () => {
                         <span className="text-slate-300">·</span>
                         <span className="text-xs text-slate-600">
                           Asesor QA: <strong>{item.qaName}</strong>
+                          {isQA && (
+                            <span className="ml-1 text-[10px] bg-purple-100 text-purple-700 font-bold px-1.5 py-0.2 rounded">
+                              Saya
+                            </span>
+                          )}
                         </span>
                       </div>
 
@@ -1328,7 +1488,7 @@ export const CalibrationView: React.FC = () => {
           {/* Filtered Calibration Records Table */}
           <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-2xs space-y-3">
             <h3 className="text-sm font-bold text-slate-900">
-              Daftar Kalibrasi Berdasarkan Filter ({filteredCalibrations.length} Data)
+              Daftar Kalibrasi Berdasarkan Filter ({dashboardList.length} Data)
             </h3>
 
             <div className="overflow-x-auto border border-slate-100 rounded-lg">
@@ -1345,14 +1505,14 @@ export const CalibrationView: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {filteredCalibrations.length === 0 ? (
+                  {dashboardList.length === 0 ? (
                     <tr>
                       <td colSpan={7} className="py-6 text-center text-slate-400">
                         Tidak ada data kalibrasi yang cocok dengan kombinasi 5 filter di atas.
                       </td>
                     </tr>
                   ) : (
-                    filteredCalibrations.map((c) => (
+                    dashboardList.map((c) => (
                       <tr key={c.id} className="hover:bg-slate-50">
                         <td className="py-2.5 px-3 font-mono font-bold text-slate-900">{c.nomorTiket}</td>
                         <td className="py-2.5 px-3 font-medium text-slate-800">{c.ticket.namaPetugas}</td>

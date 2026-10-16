@@ -1,5 +1,8 @@
-import React, { useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
+import { cleanCategory } from '../utils/csvParser';
+import { DashboardAnalysisView } from './DashboardAnalysisView';
+import { DashboardResetView } from './DashboardResetView';
 import {
   TrendingUp,
   Award,
@@ -14,6 +17,10 @@ import {
   ArrowUpRight,
   ShieldAlert,
   Sparkles,
+  PieChart,
+  BarChart3,
+  FileSearch,
+  RotateCcw,
 } from 'lucide-react';
 
 export const DashboardView: React.FC = () => {
@@ -29,16 +36,20 @@ export const DashboardView: React.FC = () => {
     currentUser,
   } = useApp();
 
+  const [dashboardSubTab, setDashboardSubTab] = useState<'ringkasan' | 'analisis' | 'reset'>('ringkasan');
+
   const role = currentUser?.role;
 
-  // List of unique agents
+  // List of unique agents (cascading)
   const agentList = useMemo(() => {
     const set = new Set<string>();
     tickets.forEach((t) => {
-      if (t.namaPetugas) set.add(t.namaPetugas);
+      let match = true;
+      if (filters.kategori !== 'all' && t.kategori !== filters.kategori) match = false;
+      if (match && t.namaPetugas) set.add(t.namaPetugas);
     });
     return Array.from(set).sort();
-  }, [tickets]);
+  }, [tickets, filters]);
 
   // Real-time KPIs
   const totalTickets = filteredTickets.length;
@@ -135,21 +146,90 @@ export const DashboardView: React.FC = () => {
     });
   }, [indicators, filteredEvaluations]);
 
-  // Category Distribution
+  // Category Distribution from synced sheet data
   const categoryStats = useMemo(() => {
-    let informasiCount = 0;
-    let pengaduanCount = 0;
+    const counts: Record<string, number> = {};
     filteredTickets.forEach((t) => {
-      if (t.kategori.toLowerCase() === 'pengaduan') pengaduanCount++;
-      else informasiCount++;
+      const cat = cleanCategory(t.kategori) || t.kategori || 'Informasi';
+      counts[cat] = (counts[cat] || 0) + 1;
     });
-    return { informasiCount, pengaduanCount };
+
+    const standardOrder: Record<string, number> = {
+      'Informasi': 1,
+      'Permintaan': 2,
+      'Pengaduan': 3,
+    };
+
+    const list = Object.keys(counts).sort(
+      (a, b) => (standardOrder[a] || 99) - (standardOrder[b] || 99) || a.localeCompare(b)
+    );
+
+    const info = counts['Informasi'] || 0;
+    const minta = counts['Permintaan'] || 0;
+    const aduan = counts['Pengaduan'] || 0;
+
+    return {
+      counts,
+      list,
+      informasi: info,
+      permintaan: minta,
+      pengaduan: aduan,
+      Informasi: info,
+      Permintaan: minta,
+      Pengaduan: aduan,
+      total: filteredTickets.length,
+    };
   }, [filteredTickets]);
 
   const predicate = getScorePredicate(averageQualityScore);
 
   return (
     <div className="space-y-6">
+      {/* Sub-menu Toggle Bar */}
+      <div className="bg-white rounded-xl border border-slate-200 p-2 shadow-2xs flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setDashboardSubTab('ringkasan')}
+            className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 transition ${
+              dashboardSubTab === 'ringkasan'
+                ? 'bg-teal-600 text-white shadow-xs'
+                : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+            }`}
+          >
+            <BarChart3 className="w-4 h-4" /> Ringkasan Mutu & Statistik
+          </button>
+          <button
+            onClick={() => setDashboardSubTab('analisis')}
+            className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 transition ${
+              dashboardSubTab === 'analisis'
+                ? 'bg-teal-600 text-white shadow-xs'
+                : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+            }`}
+          >
+            <FileSearch className="w-4 h-4" /> Analisis & Rekomendasi
+          </button>
+          <button
+            onClick={() => setDashboardSubTab('reset')}
+            className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 transition ${
+              dashboardSubTab === 'reset'
+                ? 'bg-rose-600 text-white shadow-xs'
+                : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+            }`}
+          >
+            <RotateCcw className="w-4 h-4" /> Reset & Hapus Nilai
+          </button>
+        </div>
+        <div className="text-xs text-slate-500 font-medium px-3 hidden sm:block">
+          Modul Dashboard Mutu & Analisis
+        </div>
+      </div>
+
+      {dashboardSubTab === 'analisis' ? (
+        <DashboardAnalysisView />
+      ) : dashboardSubTab === 'reset' ? (
+        <DashboardResetView />
+      ) : (
+        <div className="space-y-6">
       {/* Realtime Filters Bar */}
       <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-2xs">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -264,26 +344,48 @@ export const DashboardView: React.FC = () => {
           </div>
         </div>
 
-        {/* Card 3: Dispute / Sanggahan Rate */}
+        {/* Card 3: Komposisi Kategori Data Sheet */}
         <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-2xs">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-              Tingkat Sanggahan (Dispute)
+              Komposisi Kategori
             </span>
-            <div className="w-8 h-8 rounded-lg bg-amber-50 text-amber-700 flex items-center justify-center">
-              <ShieldAlert className="w-4 h-4" />
+            <div className="w-8 h-8 rounded-lg bg-teal-50 text-teal-700 flex items-center justify-center">
+              <PieChart className="w-4 h-4" />
             </div>
           </div>
-          <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-3xl font-extrabold text-slate-900">{disputeRate}%</span>
-            <span className="text-xs text-slate-500">
-              ({rebuttedEvaluations.length} sanggahan diajukan)
-            </span>
-          </div>
-          <div className="mt-2 flex items-center gap-2 text-[11px] text-slate-500">
-            <span>
-              {filteredEvaluations.filter((e) => e.status === 'PROSES_SANGGAHAN').length} Menunggu Putusan QA
-            </span>
+          <div className="mt-3">
+            <div className="flex items-baseline justify-between mb-2">
+              <span className="text-3xl font-extrabold text-slate-900">{totalTickets}</span>
+              <span className="text-xs text-slate-500">Tiket Terdata</span>
+            </div>
+            {/* 3 Categories: Informasi, Permintaan, Pengaduan (sesuai kolom KATEGORI data sheet) */}
+            <div className="grid grid-cols-3 gap-1.5 pt-2 border-t border-slate-100 text-center">
+              <div className="bg-blue-50/70 border border-blue-100 rounded-lg py-1.5 px-1">
+                <span className="text-[10px] font-semibold text-blue-700 block truncate">Informasi</span>
+                <span className="text-sm font-bold text-blue-900">{categoryStats.informasi}</span>
+              </div>
+              <div className="bg-amber-50/70 border border-amber-100 rounded-lg py-1.5 px-1">
+                <span className="text-[10px] font-semibold text-amber-700 block truncate">Permintaan</span>
+                <span className="text-sm font-bold text-amber-900">{categoryStats.permintaan}</span>
+              </div>
+              <div className="bg-teal-50/70 border border-teal-100 rounded-lg py-1.5 px-1">
+                <span className="text-[10px] font-semibold text-teal-700 block truncate">Pengaduan</span>
+                <span className="text-sm font-bold text-teal-900">{categoryStats.pengaduan}</span>
+              </div>
+            </div>
+            {/* Kategori lain dari sheet jika ada */}
+            {categoryStats.list.filter((c) => !['Informasi', 'Permintaan', 'Pengaduan'].includes(c)).length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1 text-[10px]">
+                {categoryStats.list
+                  .filter((c) => !['Informasi', 'Permintaan', 'Pengaduan'].includes(c))
+                  .map((c) => (
+                    <span key={c} className="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded font-medium">
+                      {c}: {categoryStats.counts[c]}
+                    </span>
+                  ))}
+              </div>
+            )}
           </div>
         </div>
 
@@ -463,16 +565,21 @@ export const DashboardView: React.FC = () => {
           {/* Category distribution footer */}
           <div className="pt-5 mt-5 border-t border-slate-100">
             <div className="text-xs font-semibold text-slate-700 mb-2">Komposisi Tiket</div>
-            <div className="flex items-center gap-4 text-xs">
-              <div className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded-full bg-teal-600"></span>
-                <span className="text-slate-600">Pengaduan:</span>
-                <span className="font-bold text-slate-900">{categoryStats.pengaduanCount}</span>
-              </div>
+            <div className="flex flex-wrap items-center gap-4 text-xs">
               <div className="flex items-center gap-2">
                 <span className="w-3 h-3 rounded-full bg-blue-500"></span>
                 <span className="text-slate-600">Informasi:</span>
-                <span className="font-bold text-slate-900">{categoryStats.informasiCount}</span>
+                <span className="font-bold text-slate-900">{categoryStats.Informasi}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-3 h-3 rounded-full bg-amber-500"></span>
+                <span className="text-slate-600">Permintaan:</span>
+                <span className="font-bold text-slate-900">{categoryStats.Permintaan}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-3 h-3 rounded-full bg-teal-600"></span>
+                <span className="text-slate-600">Pengaduan:</span>
+                <span className="font-bold text-slate-900">{categoryStats.Pengaduan}</span>
               </div>
             </div>
           </div>
@@ -565,6 +672,8 @@ export const DashboardView: React.FC = () => {
           )}
         </div>
       </div>
+    </div>
+      )}
     </div>
   );
 };

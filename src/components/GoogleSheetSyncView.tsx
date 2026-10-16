@@ -21,7 +21,7 @@ import {
   Check,
   Sparkles,
 } from 'lucide-react';
-import { generateSampleGoogleSheetCSV } from '../utils/csvParser';
+import { generateSampleGoogleSheetCSV, cleanCategory } from '../utils/csvParser';
 import { Ticket } from '../types';
 
 export const GoogleSheetSyncView: React.FC = () => {
@@ -129,8 +129,20 @@ export const GoogleSheetSyncView: React.FC = () => {
   // Quick statistics calculated from active tickets
   const statistics = useMemo(() => {
     const total = tickets.length;
-    const pengaduanCount = tickets.filter((t) => t.kategori.toLowerCase().includes('pengaduan')).length;
-    const infoCount = total - pengaduanCount;
+    const catCounts: Record<string, number> = {};
+    tickets.forEach((t) => {
+      const c = cleanCategory(t.kategori);
+      if (c) catCounts[c] = (catCounts[c] || 0) + 1;
+    });
+
+    const standardOrder: Record<string, number> = { 'Informasi': 1, 'Permintaan': 2, 'Pengaduan': 3 };
+    const categories = Object.keys(catCounts).sort(
+      (a, b) => (standardOrder[a] || 99) - (standardOrder[b] || 99) || a.localeCompare(b)
+    );
+
+    const infoCount = catCounts['Informasi'] || 0;
+    const permintaanCount = catCounts['Permintaan'] || 0;
+    const pengaduanCount = catCounts['Pengaduan'] || 0;
     const uniqueAgents = Array.from(new Set(tickets.map((t) => t.namaPetugas).filter(Boolean)));
     const dates = tickets.map((t) => t.tanggalTiket).filter(Boolean).sort();
     const minDate = dates[0] || '-';
@@ -139,8 +151,11 @@ export const GoogleSheetSyncView: React.FC = () => {
 
     return {
       total,
-      pengaduanCount,
       infoCount,
+      permintaanCount,
+      pengaduanCount,
+      catCounts,
+      categories,
       agentCount: uniqueAgents.length,
       dateRange: minDate === maxDate ? minDate : `${minDate} s.d. ${maxDate}`,
       sampledCount,
@@ -162,7 +177,7 @@ export const GoogleSheetSyncView: React.FC = () => {
         if (!matches) return false;
       }
       if (previewCategory !== 'all') {
-        if (t.kategori.toLowerCase() !== previewCategory.toLowerCase()) return false;
+        if (cleanCategory(t.kategori) !== previewCategory) return false;
       }
       if (previewSampledFilter !== 'all') {
         const isSampled = previewSampledFilter === 'sampled';
@@ -182,7 +197,7 @@ export const GoogleSheetSyncView: React.FC = () => {
   const requiredColumns = [
     { name: 'nomor tiket', desc: 'Identitas unik tiket (contoh: TKT-2025-001, No Tiket, ID)' },
     { name: 'tanggal tiket', desc: 'Tanggal pelaporan (YYYY-MM-DD atau format tanggal Excel)' },
-    { name: 'kategori', desc: 'Informasi atau Pengaduan' },
+    { name: 'kategori', desc: 'Informasi, Permintaan, atau Pengaduan' },
     { name: 'pokok masalah', desc: 'Substansi masalah (contoh: Pelayanan Faskes, Iuran)' },
     { name: 'topik masalah', desc: 'Rincian spesifik masalah (contoh: Antrean, REHAB)' },
     { name: 'isi keluhan', desc: 'Teks pesan/pertanyaan lengkap dari peserta masyarakat' },
@@ -250,13 +265,15 @@ export const GoogleSheetSyncView: React.FC = () => {
               <Layers className="w-3.5 h-3.5 text-indigo-600" />
               Komposisi Kategori
             </div>
-            <div className="text-xs font-bold text-slate-800 mt-1 flex items-center gap-2">
-              <span className="text-rose-600">{statistics.pengaduanCount} Aduan</span>
+            <div className="text-xs font-bold text-slate-800 mt-1 flex flex-wrap items-center gap-1.5">
+              <span className="text-blue-600 font-semibold">{statistics.infoCount} Info</span>
               <span className="text-slate-300">·</span>
-              <span className="text-blue-600">{statistics.infoCount} Info</span>
+              <span className="text-amber-600 font-semibold">{statistics.permintaanCount} Permintaan</span>
+              <span className="text-slate-300">·</span>
+              <span className="text-rose-600 font-semibold">{statistics.pengaduanCount} Pengaduan</span>
             </div>
             <div className="text-[10px] text-slate-400 mt-0.5">
-              Rasio pengaduan/info
+              3 Kategori Resmi Standar BPJS
             </div>
           </div>
 
@@ -584,9 +601,12 @@ export const GoogleSheetSyncView: React.FC = () => {
               }}
               className="px-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium text-slate-700"
             >
-              <option value="all">Semua Kategori</option>
-              <option value="Pengaduan">Pengaduan</option>
-              <option value="Informasi">Informasi</option>
+              <option value="all">Semua Kategori ({tickets.length})</option>
+              {statistics.categories.map((cat) => (
+                <option key={cat} value={cat}>
+                  {cat} ({statistics.catCounts[cat] || 0})
+                </option>
+              ))}
             </select>
 
             {/* Filter Sampled Status */}
@@ -666,8 +686,10 @@ export const GoogleSheetSyncView: React.FC = () => {
                       <td className="py-2.5 px-3 whitespace-nowrap">
                         <span
                           className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                            t.kategori.toLowerCase().includes('pengaduan')
+                            t.kategori === 'Pengaduan'
                               ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                              : t.kategori === 'Permintaan'
+                              ? 'bg-amber-50 text-amber-700 border border-amber-200'
                               : 'bg-blue-50 text-blue-700 border border-blue-200'
                           }`}
                         >

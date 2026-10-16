@@ -16,7 +16,7 @@ export interface User {
 export interface Ticket {
   nomorTiket: string;      // Nomor Tiket (e.g. TKT-2025-001)
   tanggalTiket: string;    // Tanggal Tiket (YYYY-MM-DD)
-  kategori: string;        // Kategori (Informasi / Pengaduan)
+  kategori: string;        // Kategori (Informasi / Permintaan / Pengaduan)
   pokokMasalah: string;    // Pokok Masalah
   topikMasalah: string;    // Topik Masalah
   isiKeluhan: string;      // Isi Keluhan Peserta / Pelapor

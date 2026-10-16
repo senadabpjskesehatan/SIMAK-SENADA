@@ -1,7 +1,8 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { Ticket, IndicatorScore } from '../types';
 import { DEFAULT_NILAI_OPTIONS } from '../data/mockData';
+import { cleanCategory } from '../utils/csvParser';
 import {
   Scale,
   Sparkles,
@@ -36,11 +37,12 @@ export const SamplingView: React.FC = () => {
   } = useApp();
 
   // 4 Required Filter states: Nama Petugas, Kategori, Pokok Masalah, Topik Masalah
+  // 4 Required Filter states: Nama Petugas, Kategori, Pokok Masalah, Topik Masalah
   const [selectedAgent, setSelectedAgent] = useState('all');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [selectedPokokMasalah, setSelectedPokokMasalah] = useState('all');
   const [selectedTopikMasalah, setSelectedTopikMasalah] = useState('all');
-  const [filterSampled, setFilterSampled] = useState<'unsampled' | 'sampled' | 'all'>('sampled');
+  const [filterSampled, setFilterSampled] = useState<'unsampled' | 'sampled' | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
   // Default: does not display all data until "Sampling Acak Otomatis" is clicked
@@ -60,46 +62,172 @@ export const SamplingView: React.FC = () => {
   // Success message after submission
   const [successToast, setSuccessToast] = useState<{ show: boolean; ticketNo: string; agent: string } | null>(null);
 
-  // List of unique agents
-  const agents = useMemo(() => {
-    const set = new Set<string>();
-    tickets.forEach((t) => {
-      if (t.namaPetugas) set.add(t.namaPetugas);
-    });
-    return Array.from(set).sort();
-  }, [tickets]);
+  // Symmetrical cascading matcher: checks if ticket matches all OTHER active filters
+  const ticketMatchesFilters = (
+    t: Ticket,
+    excludeKey?: 'agent' | 'category' | 'pokok' | 'topik'
+  ) => {
+    // 1. Sampling status filter
+    if (filterSampled === 'unsampled' && t.sampled) return false;
+    if (filterSampled === 'sampled' && !t.sampled) return false;
 
-  // List of unique Pokok Masalah
-  const pokokMasalahList = useMemo(() => {
-    const set = new Set<string>();
-    tickets.forEach((t) => {
-      if (t.pokokMasalah) set.add(t.pokokMasalah);
-    });
-    return Array.from(set).sort();
-  }, [tickets]);
+    // 2. Nama Petugas
+    if (excludeKey !== 'agent' && selectedAgent !== 'all') {
+      if (t.namaPetugas !== selectedAgent) return false;
+    }
 
-  // List of unique Topik Masalah (filtered by selectedPokokMasalah)
-  const topikMasalahList = useMemo(() => {
-    const set = new Set<string>();
+    // 3. Kategori
+    if (excludeKey !== 'category' && selectedCategory !== 'all') {
+      if (cleanCategory(t.kategori) !== selectedCategory) return false;
+    }
+
+    // 4. Pokok Masalah
+    if (excludeKey !== 'pokok' && selectedPokokMasalah !== 'all') {
+      if (t.pokokMasalah !== selectedPokokMasalah) return false;
+    }
+
+    // 5. Topik Masalah
+    if (excludeKey !== 'topik' && selectedTopikMasalah !== 'all') {
+      if (t.topikMasalah !== selectedTopikMasalah) return false;
+    }
+
+    return true;
+  };
+
+  // 1. Available Agent options (cascading with Category, Pokok Masalah, Topik Masalah, filterSampled)
+  const agentOptions = useMemo(() => {
+    const counts: Record<string, number> = {};
     tickets.forEach((t) => {
-      if (t.topikMasalah) {
-        if (selectedPokokMasalah === 'all' || t.pokokMasalah === selectedPokokMasalah) {
-          set.add(t.topikMasalah);
+      if (ticketMatchesFilters(t, 'agent')) {
+        const name = t.namaPetugas?.trim();
+        if (name) {
+          counts[name] = (counts[name] || 0) + 1;
         }
       }
     });
-    return Array.from(set).sort();
-  }, [tickets, selectedPokokMasalah]);
 
-  // Action: Sampling Acak Otomatis (Menampilkan 10 data berdasarkan filter)
-  const handleRandomSamplePick = () => {
-    const matching = tickets.filter((t) => {
-      if (filterSampled === 'unsampled' && t.sampled) return false;
-      if (filterSampled === 'sampled' && !t.sampled) return false;
-      if (selectedAgent !== 'all' && t.namaPetugas !== selectedAgent) return false;
-      if (selectedCategory !== 'all' && t.kategori !== selectedCategory) return false;
-      if (selectedPokokMasalah !== 'all' && t.pokokMasalah !== selectedPokokMasalah) return false;
-      if (selectedTopikMasalah !== 'all' && t.topikMasalah !== selectedTopikMasalah) return false;
+    return Object.keys(counts)
+      .sort((a, b) => a.localeCompare(b))
+      .map((name) => ({
+        value: name,
+        label: `${name} (${counts[name]})`,
+        count: counts[name],
+      }));
+  }, [tickets, selectedCategory, selectedPokokMasalah, selectedTopikMasalah, filterSampled]);
+
+  // 2. Available Category options (cascading with Agent, Pokok Masalah, Topik Masalah, filterSampled)
+  // Only shows categories that actually exist in the matching data!
+  const categoryOptions = useMemo(() => {
+    const counts: Record<string, number> = {};
+    tickets.forEach((t) => {
+      if (ticketMatchesFilters(t, 'category')) {
+        const cat = cleanCategory(t.kategori);
+        if (cat) {
+          counts[cat] = (counts[cat] || 0) + 1;
+        }
+      }
+    });
+
+    const standardOrder: Record<string, number> = {
+      'Informasi': 1,
+      'Permintaan': 2,
+      'Pengaduan': 3,
+    };
+
+    return Object.keys(counts)
+      .sort((a, b) => (standardOrder[a] || 99) - (standardOrder[b] || 99) || a.localeCompare(b))
+      .map((cat) => ({
+        value: cat,
+        label: `${cat} (${counts[cat]})`,
+        count: counts[cat],
+      }));
+  }, [tickets, selectedAgent, selectedPokokMasalah, selectedTopikMasalah, filterSampled]);
+
+  // 3. Available Pokok Masalah options (cascading with Agent, Category, Topik Masalah, filterSampled)
+  const pokokMasalahOptions = useMemo(() => {
+    const counts: Record<string, number> = {};
+    tickets.forEach((t) => {
+      if (ticketMatchesFilters(t, 'pokok')) {
+        const pm = t.pokokMasalah?.trim();
+        if (pm) {
+          counts[pm] = (counts[pm] || 0) + 1;
+        }
+      }
+    });
+
+    return Object.keys(counts)
+      .sort((a, b) => a.localeCompare(b))
+      .map((pm) => ({
+        value: pm,
+        label: `${pm} (${counts[pm]})`,
+        count: counts[pm],
+      }));
+  }, [tickets, selectedAgent, selectedCategory, selectedTopikMasalah, filterSampled]);
+
+  // 4. Available Topik Masalah options (cascading with Agent, Category, Pokok Masalah, filterSampled)
+  const topikMasalahOptions = useMemo(() => {
+    const counts: Record<string, number> = {};
+    tickets.forEach((t) => {
+      if (ticketMatchesFilters(t, 'topik')) {
+        const tm = t.topikMasalah?.trim();
+        if (tm) {
+          counts[tm] = (counts[tm] || 0) + 1;
+        }
+      }
+    });
+
+    return Object.keys(counts)
+      .sort((a, b) => a.localeCompare(b))
+      .map((tm) => ({
+        value: tm,
+        label: `${tm} (${counts[tm]})`,
+        count: counts[tm],
+      }));
+  }, [tickets, selectedAgent, selectedCategory, selectedPokokMasalah, filterSampled]);
+
+  // Auto-reset dependent filter values if they are no longer in the cascading options list
+  useEffect(() => {
+    if (selectedAgent !== 'all' && !agentOptions.some((o) => o.value === selectedAgent)) {
+      setSelectedAgent('all');
+    }
+  }, [agentOptions, selectedAgent]);
+
+  useEffect(() => {
+    if (selectedCategory !== 'all' && !categoryOptions.some((o) => o.value === selectedCategory)) {
+      setSelectedCategory('all');
+    }
+  }, [categoryOptions, selectedCategory]);
+
+  useEffect(() => {
+    if (selectedPokokMasalah !== 'all' && !pokokMasalahOptions.some((o) => o.value === selectedPokokMasalah)) {
+      setSelectedPokokMasalah('all');
+    }
+  }, [pokokMasalahOptions, selectedPokokMasalah]);
+
+  useEffect(() => {
+    if (selectedTopikMasalah !== 'all' && !topikMasalahOptions.some((o) => o.value === selectedTopikMasalah)) {
+      setSelectedTopikMasalah('all');
+    }
+  }, [topikMasalahOptions, selectedTopikMasalah]);
+
+  // Check if any filter is active
+  const hasActiveFilters =
+    selectedAgent !== 'all' ||
+    selectedCategory !== 'all' ||
+    selectedPokokMasalah !== 'all' ||
+    selectedTopikMasalah !== 'all';
+
+  const handleResetFilters = () => {
+    setSelectedAgent('all');
+    setSelectedCategory('all');
+    setSelectedPokokMasalah('all');
+    setSelectedTopikMasalah('all');
+  };
+
+  // Live matching tickets according to current filters & search
+  const matchingTickets = useMemo(() => {
+    return tickets.filter((t) => {
+      if (!ticketMatchesFilters(t)) return false;
 
       if (searchQuery.trim()) {
         const query = searchQuery.toLowerCase();
@@ -115,15 +243,20 @@ export const SamplingView: React.FC = () => {
 
       return true;
     });
+  }, [tickets, filterSampled, selectedAgent, selectedCategory, selectedPokokMasalah, selectedTopikMasalah, searchQuery]);
 
-    if (matching.length === 0) {
+  const matchingTicketsCount = matchingTickets.length;
+
+  // Action: Sampling Acak Otomatis (Menampilkan 10 data berdasarkan filter)
+  const handleRandomSamplePick = () => {
+    if (matchingTickets.length === 0) {
       setSampledTicketsList([]);
       setHasSampledClicked(true);
       return;
     }
 
     // Shuffle and pick up to 10
-    const shuffled = [...matching].sort(() => 0.5 - Math.random());
+    const shuffled = [...matchingTickets].sort(() => 0.5 - Math.random());
     const selected10 = shuffled.slice(0, 10);
 
     setSampledTicketsList(selected10);
@@ -349,18 +482,29 @@ export const SamplingView: React.FC = () => {
         <div className="pt-4 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
           {/* 1. Nama Petugas */}
           <div className="space-y-1">
-            <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider">
-              1. Nama Petugas
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider">
+                1. Nama Petugas
+              </label>
+              {selectedAgent !== 'all' && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedAgent('all')}
+                  className="text-[10px] text-teal-600 hover:text-teal-800 font-semibold cursor-pointer"
+                >
+                  Reset
+                </button>
+              )}
+            </div>
             <select
               value={selectedAgent}
               onChange={(e) => setSelectedAgent(e.target.value)}
-              className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500 font-medium text-slate-800"
+              className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500 font-medium text-slate-800 transition"
             >
-              <option value="all">Semua Petugas</option>
-              {agents.map((ag) => (
-                <option key={ag} value={ag}>
-                  {ag}
+              <option value="all">Semua Petugas ({agentOptions.length})</option>
+              {agentOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
                 </option>
               ))}
             </select>
@@ -368,37 +512,59 @@ export const SamplingView: React.FC = () => {
 
           {/* 2. Kategori */}
           <div className="space-y-1">
-            <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider">
-              2. Kategori
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider">
+                2. Kategori
+              </label>
+              {selectedCategory !== 'all' && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedCategory('all')}
+                  className="text-[10px] text-teal-600 hover:text-teal-800 font-semibold cursor-pointer"
+                >
+                  Reset
+                </button>
+              )}
+            </div>
             <select
               value={selectedCategory}
               onChange={(e) => setSelectedCategory(e.target.value)}
-              className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500 font-medium text-slate-800"
+              className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500 font-medium text-slate-800 transition"
             >
-              <option value="all">Semua Kategori</option>
-              <option value="Pengaduan">Pengaduan</option>
-              <option value="Informasi">Informasi</option>
+              <option value="all">Semua Kategori ({categoryOptions.length})</option>
+              {categoryOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
             </select>
           </div>
 
           {/* 3. Pokok Masalah */}
           <div className="space-y-1">
-            <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider">
-              3. Pokok Masalah
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider">
+                3. Pokok Masalah
+              </label>
+              {selectedPokokMasalah !== 'all' && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedPokokMasalah('all')}
+                  className="text-[10px] text-teal-600 hover:text-teal-800 font-semibold cursor-pointer"
+                >
+                  Reset
+                </button>
+              )}
+            </div>
             <select
               value={selectedPokokMasalah}
-              onChange={(e) => {
-                setSelectedPokokMasalah(e.target.value);
-                setSelectedTopikMasalah('all');
-              }}
-              className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500 font-medium text-slate-800"
+              onChange={(e) => setSelectedPokokMasalah(e.target.value)}
+              className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500 font-medium text-slate-800 transition"
             >
-              <option value="all">Semua Pokok Masalah</option>
-              {pokokMasalahList.map((pm) => (
-                <option key={pm} value={pm}>
-                  {pm}
+              <option value="all">Semua Pokok Masalah ({pokokMasalahOptions.length})</option>
+              {pokokMasalahOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
                 </option>
               ))}
             </select>
@@ -406,18 +572,29 @@ export const SamplingView: React.FC = () => {
 
           {/* 4. Topik Masalah */}
           <div className="space-y-1">
-            <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider">
-              4. Topik Masalah
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider">
+                4. Topik Masalah
+              </label>
+              {selectedTopikMasalah !== 'all' && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedTopikMasalah('all')}
+                  className="text-[10px] text-teal-600 hover:text-teal-800 font-semibold cursor-pointer"
+                >
+                  Reset
+                </button>
+              )}
+            </div>
             <select
               value={selectedTopikMasalah}
               onChange={(e) => setSelectedTopikMasalah(e.target.value)}
-              className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500 font-medium text-slate-800"
+              className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500 font-medium text-slate-800 transition"
             >
-              <option value="all">Semua Topik Masalah</option>
-              {topikMasalahList.map((tm) => (
-                <option key={tm} value={tm}>
-                  {tm}
+              <option value="all">Semua Topik Masalah ({topikMasalahOptions.length})</option>
+              {topikMasalahOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
                 </option>
               ))}
             </select>
@@ -443,18 +620,34 @@ export const SamplingView: React.FC = () => {
               onChange={(e) => setFilterSampled(e.target.value as any)}
               className="text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500 font-medium"
             >
+              <option value="all">Semua Status (Disampling & Belum)</option>
               <option value="unsampled">Belum Disampling</option>
               <option value="sampled">Sudah Disampling</option>
-              <option value="all">Semua Status</option>
             </select>
+
+            {hasActiveFilters && (
+              <button
+                type="button"
+                onClick={handleResetFilters}
+                className="text-xs text-rose-600 hover:text-rose-700 font-semibold px-2.5 py-1 rounded-lg border border-rose-200 hover:bg-rose-50 transition cursor-pointer"
+              >
+                Reset Semua Filter
+              </button>
+            )}
           </div>
 
-          <div className="text-slate-500 font-medium">
+          <div className="text-slate-500 font-medium flex items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 bg-slate-100 text-slate-700 px-2.5 py-1 rounded-lg font-semibold">
+              <Layers className="w-3.5 h-3.5 text-teal-600" />
+              Tersedia: <strong className="text-teal-700">{matchingTicketsCount}</strong> tiket sesuai filter
+            </span>
             {hasSampledClicked ? (
-              <span>Menampilkan <strong className="text-slate-800">{displayedTickets.length}</strong> data sampling terpilih</span>
+              <span className="text-slate-600">
+                | Menampilkan <strong className="text-slate-800">{displayedTickets.length}</strong> data sampling terpilih
+              </span>
             ) : (
-              <span className="text-amber-700 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200 font-semibold">
-                Silakan pilih filter dan klik tombol "Sampling Acak Otomatis"
+              <span className="text-amber-700 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200 font-semibold hidden md:inline-block">
+                Klik "Sampling Acak Otomatis" untuk memilih 10 data
               </span>
             )}
           </div>

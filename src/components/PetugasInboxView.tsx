@@ -43,7 +43,6 @@ export const PetugasInboxView: React.FC = () => {
 
   // Active item for sanggahan modal
   const [sanggahanTarget, setSanggahanTarget] = useState<SamplingEvaluation | null>(null);
-  const [selectedIndicatorId, setSelectedIndicatorId] = useState<string>(indicators[0]?.id || '');
   const [argumenPetugas, setArgumenPetugas] = useState('');
   const [formError, setFormError] = useState('');
 
@@ -146,7 +145,6 @@ export const PetugasInboxView: React.FC = () => {
       return;
     }
     setSanggahanTarget(item);
-    setSelectedIndicatorId(indicators[0]?.id || '');
     setArgumenPetugas('');
     setFormError('');
   };
@@ -160,22 +158,14 @@ export const PetugasInboxView: React.FC = () => {
       return;
     }
 
-    if (!selectedIndicatorId) {
-      setFormError('Mohon pilih indikator yang disanggah.');
-      return;
-    }
-
     if (!argumenPetugas.trim() || argumenPetugas.length < 10) {
       setFormError('Mohon isi penjelasan sanggahan secara lengkap (minimal 10 karakter).');
       return;
     }
 
-    const selectedInd = indicators.find((i) => i.id === selectedIndicatorId);
-    const alasanSanggahan = selectedInd ? `Indikator Disanggah: ${selectedInd.nama}` : 'Sanggahan Indikator Mutu';
-
     const payload: SanggahanData = {
       tanggalSanggah: new Date().toISOString().replace('T', ' ').slice(0, 19),
-      alasanSanggahan,
+      alasanSanggahan: 'Sanggahan Penilaian Mutu Tiket',
       argumenPetugas: argumenPetugas.trim(),
       petugasName: currentUser?.name || 'Petugas',
     };
@@ -624,37 +614,17 @@ export const PetugasInboxView: React.FC = () => {
                 </div>
               )}
 
-              {/* 3.a. Indikator : pilihan dropdown sesuai indikator yang sudah dibuat. wajib diisi */}
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">
-                  Indikator Mutu yang Disanggah *
-                </label>
-                <select
-                  required
-                  value={selectedIndicatorId}
-                  onChange={(e) => setSelectedIndicatorId(e.target.value)}
-                  className="w-full p-2.5 rounded-lg border border-slate-300 bg-white focus:ring-2 focus:ring-amber-500 font-medium text-slate-800"
-                >
-                  <option value="" disabled>-- Pilih Indikator Mutu --</option>
-                  {indicators.map((ind) => (
-                    <option key={ind.id} value={ind.id}>
-                      {ind.nama} (Bobot: {ind.bobot}%)
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* 3.b. Penjelasan : free text yang dapat diisi oleh petugas layanan. wajib diisi */}
+              {/* Penjelasan : free text yang dapat diisi oleh petugas layanan. wajib diisi */}
               <div>
                 <label className="block font-bold text-slate-700 mb-1">
                   Penjelasan / Argumentasi Sanggahan *
                 </label>
                 <textarea
-                  rows={4}
+                  rows={5}
                   required
                   value={argumenPetugas}
                   onChange={(e) => setArgumenPetugas(e.target.value)}
-                  placeholder="Masukkan penjelasan komprehensif mengapa penilaian indikator tersebut tidak sesuai dan sertakan dasar ketentuan atau SOP..."
+                  placeholder="Masukkan penjelasan dan argumentasi sanggahan Anda secara komprehensif terkait penilaian mutu tiket ini, serta sertakan fakta atau rujukan ketentuan/SOP yang relevan..."
                   className="w-full p-3 rounded-lg border border-slate-300 focus:ring-2 focus:ring-amber-500 bg-white text-xs leading-relaxed"
                 />
               </div>

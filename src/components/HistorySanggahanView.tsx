@@ -21,13 +21,50 @@ import {
 } from 'lucide-react';
 
 export const HistorySanggahanView: React.FC = () => {
-  const { evaluations, indicators, currentUser } = useApp();
+  const { evaluations, indicators, currentUser, importEvaluationsFromExcel } = useApp();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedAgent, setSelectedAgent] = useState('all');
   const [selectedMonth, setSelectedMonth] = useState('all');
   const [selectedStatus, setSelectedStatus] = useState('all');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadMsg, setUploadMsg] = useState<{ success: boolean; text: string } | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const handleDownloadTemplate = () => {
+    const templateRows = [
+      [
+        'Nomor Tiket', 'Tanggal Tiket', 'Kategori', 'Pokok Masalah', 'Topik Masalah', 'Isi Keluhan', 'Isi Jawaban', 'Rating', 'Nama Petugas',
+        'Tanggal Sampling', 'Quality Aasurance',
+        'Salam Pembuka', 'Menyapa Peserta', 'Pemilihan Topik Masalah', 'Anaisis', 'Akurasi Informasi', 'Edukasi Tambahan', 'Kesesuaian Tindak Lanjut', 'Pemilihan Kata Dan Bahasa', 'Kemampuan Presentasi', 'Edukasi Rating', 'Salam Penutup',
+        'Catatan'
+      ],
+      [
+        'TKT-2025-9001', '01/02/2025', 'Informasi', 'Pelayanan Faskes', 'Syarat Pendaftaran', 'Peserta menanyakan syarat faskes.', 'Petugas menjelaskan persyaratan KTP & KK.', 5, 'DINDA MUTIA HIDAYATI',
+        '02/02/2025', 'SITI QA SPECIALIST',
+        3, 3, 3, 2, 3, 3, 3, 2, 3, 3, 3,
+        'Pelayanan sangat baik dan komunikatif.'
+      ]
+    ];
+    const ws = XLSX.utils.aoa_to_sheet(templateRows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Template Upload History');
+    XLSX.writeFile(wb, 'template_upload_history_dan_nilai_akhir.xlsx');
+  };
+
+  const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    setUploadMsg(null);
+    const res = await importEvaluationsFromExcel(file);
+    setUploading(false);
+    setUploadMsg({ success: res.success, text: res.message });
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
 
   // Unique sampling months
   const samplingMonthList = useMemo(() => {
@@ -199,14 +236,46 @@ export const HistorySanggahanView: React.FC = () => {
             </div>
           </div>
 
-          <button
-            onClick={handleExportExcel}
-            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-xs flex items-center gap-2 transition"
-          >
-            <FileSpreadsheet className="w-3.5 h-3.5" />
-            Ekspor Rekap Excel
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileSelected}
+              accept=".xlsx,.xls,.csv"
+              className="hidden"
+            />
+            <button
+              onClick={handleDownloadTemplate}
+              className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold flex items-center gap-1.5 transition"
+              title="Unduh Template Excel 23 Kolom"
+            >
+              <Download className="w-3.5 h-3.5 text-slate-500" />
+              Unduh Template
+            </button>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              className="px-3 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-xs font-bold shadow-xs flex items-center gap-1.5 transition disabled:opacity-50"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+              {uploading ? 'Mengimpor...' : 'Upload Excel History & Nilai'}
+            </button>
+            <button
+              onClick={handleExportExcel}
+              className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-xs flex items-center gap-1.5 transition"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+              Ekspor Rekap
+            </button>
+          </div>
         </div>
+
+        {uploadMsg && (
+          <div className={`mt-3 p-3 rounded-xl text-xs font-medium flex items-center justify-between ${uploadMsg.success ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-rose-50 text-rose-800 border border-rose-200'}`}>
+            <span>{uploadMsg.text}</span>
+            <button onClick={() => setUploadMsg(null)} className="text-xs font-bold opacity-75 hover:opacity-100">Tutup</button>
+          </div>
+        )}
 
         {/* Filter Bar */}
         <div className="mt-5 pt-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">

@@ -21,7 +21,8 @@ import {
   INITIAL_CALIBRATIONS,
   DEFAULT_NILAI_OPTIONS,
 } from '../data/mockData';
-import { parseCSV, parseExcelFile, generateSampleGoogleSheetCSV } from '../utils/csvParser';
+import { parseCSV, parseExcelFile, generateSampleGoogleSheetCSV, cleanCategory } from '../utils/csvParser';
+import * as XLSX from 'xlsx';
 import {
   collection,
   getDocs,
@@ -117,8 +118,11 @@ interface AppContextType {
   currentUser: User | null;
   setCurrentUser: (user: User | null) => void;
   login: (usernameOrNip: string, password: string) => { success: boolean; message?: string };
-  logout: () => void;
+  logout: (customMessage?: string) => void;
   switchRole: (role: User['role']) => void;
+  sessionExpiresAt: number | null;
+  sessionExpiredMessage: string | null;
+  clearSessionExpiredMessage: () => void;
   users: User[];
   addUser: (user: Omit<User, 'id'>) => void;
   updateUser: (id: string, updated: Partial<User>) => void;
@@ -152,6 +156,10 @@ interface AppContextType {
     csvText: string,
     onProgress?: (percent: number, stepText: string) => void
   ) => Promise<{ success: boolean; count: number; error?: string }>;
+  importEvaluationsFromExcel: (
+    file: File,
+    onProgress?: (percent: number, stepText: string) => void
+  ) => Promise<{ success: boolean; message: string; count?: number; error?: string }>;
 
   // Sampling Evaluations & Workflow
   evaluations: SamplingEvaluation[];
@@ -173,6 +181,7 @@ interface AppContextType {
   submitPetugasAcceptance: (evaluationId: string) => void;
   submitPetugasSanggahan: (evaluationId: string, sanggahan: SanggahanData) => void;
   submitQaKeputusanAkhir: (evaluationId: string, keputusan: KeputusanAkhirData) => void;
+  deleteEvaluationsByPeriod: (period: string) => Promise<{ success: boolean; message: string; count: number }>;
 
   // Calibration module
   calibrations: CalibrationRecord[];
@@ -208,7 +217,9 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 const STORAGE_KEYS = {
-  USER: 'senada_user_v10_nodata',
+  USER: 'senada_user_session_v10',
+  SESSION_START: 'senada_session_start_v10',
+  SESSION_EXPIRES: 'senada_session_expires_v10',
   USERS_LIST: 'senada_users_list_v10_nodata',
   INDICATORS: 'senada_indicators_v10_nodata',
   TICKETS: 'senada_tickets_v10_nodata',
@@ -217,7 +228,46 @@ const STORAGE_KEYS = {
   SHEET: 'senada_sheet_v10_nodata',
 };
 
-// Safe storage wrapper to prevent QuotaExceededError or restricted environments from crashing React
+// Maximum session duration: 60 minutes (3,600,000 ms)
+export const MAX_SESSION_DURATION_MS = 60 * 60 * 1000;
+
+// SessionStorage wrapper: auto-cleared whenever browser window/tab is closed
+export const safeSessionStorage = {
+  getItem: (key: string): string | null => {
+    try {
+      if (typeof window === 'undefined' || !window.sessionStorage) return null;
+      return window.sessionStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  },
+  setItem: (key: string, value: string): void => {
+    try {
+      if (typeof window === 'undefined' || !window.sessionStorage) return;
+      window.sessionStorage.setItem(key, value);
+    } catch (err) {
+      console.warn(`[SENADA SessionStorage] Error setting "${key}"`, err);
+    }
+  },
+  removeItem: (key: string): void => {
+    try {
+      if (typeof window === 'undefined' || !window.sessionStorage) return;
+      window.sessionStorage.removeItem(key);
+    } catch {
+      // Ignore
+    }
+  },
+  clear: (): void => {
+    try {
+      if (typeof window === 'undefined' || !window.sessionStorage) return;
+      window.sessionStorage.clear();
+    } catch {
+      // Ignore
+    }
+  },
+};
+
+// Safe storage wrapper for app data (tickets, evaluations, indicators)
 const safeStorage = {
   getItem: (key: string): string | null => {
     try {
@@ -258,7 +308,7 @@ const safeStorage = {
 };
 
 // Cleanup old legacy storage with default dummy data & previous user caches
-['v1', 'v2', 'v3', 'v4', 'v4_clean', 'v5', 'v6', 'v7', 'v7_complete', 'v8_flow', 'v9'].forEach((ver) => {
+['v1', 'v2', 'v3', 'v4', 'v4_clean', 'v5', 'v6', 'v7', 'v7_complete', 'v8_flow', 'v9', 'v10_nodata'].forEach((ver) => {
   safeStorage.removeItem(`senada_tickets_${ver}`);
   safeStorage.removeItem(`senada_evaluations_${ver}`);
   safeStorage.removeItem(`senada_calibrations_${ver}`);
@@ -266,17 +316,42 @@ const safeStorage = {
   safeStorage.removeItem(`senada_user_${ver}`);
   safeStorage.removeItem(`senada_users_list_${ver}`);
 });
+// Purge any lingering user in localStorage so browser close strictly requires login
+safeStorage.removeItem('senada_user_session_v10');
+safeStorage.removeItem('senada_user_v10_nodata');
 
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  // 1. Current User (Defaults to null when not logged in, requiring login at Halaman Awal Login)
+  // Session expired notification state
+  const [sessionExpiredMessage, setSessionExpiredMessage] = useState<string | null>(null);
+  const [sessionExpiresAt, setSessionExpiresAt] = useState<number | null>(() => {
+    const expiresStr = safeSessionStorage.getItem(STORAGE_KEYS.SESSION_EXPIRES);
+    if (expiresStr) {
+      const exp = Number(expiresStr);
+      if (Date.now() < exp) return exp;
+    }
+    return null;
+  });
+
+  // 1. Current User: Stored exclusively in sessionStorage and bounded by 60 minutes
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    const saved = safeStorage.getItem(STORAGE_KEYS.USER);
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (parsed && parsed.id) return parsed;
-      } catch (e) {
-        console.error(e);
+    // Check if session has expired or if browser was closed
+    const expiresStr = safeSessionStorage.getItem(STORAGE_KEYS.SESSION_EXPIRES);
+    const saved = safeSessionStorage.getItem(STORAGE_KEYS.USER);
+
+    if (saved && expiresStr) {
+      const exp = Number(expiresStr);
+      if (Date.now() < exp) {
+        try {
+          const parsed = JSON.parse(saved);
+          if (parsed && parsed.id) return parsed;
+        } catch (e) {
+          console.error('Error parsing session user', e);
+        }
+      } else {
+        // Expired after 60 minutes
+        safeSessionStorage.removeItem(STORAGE_KEYS.USER);
+        safeSessionStorage.removeItem(STORAGE_KEYS.SESSION_START);
+        safeSessionStorage.removeItem(STORAGE_KEYS.SESSION_EXPIRES);
       }
     }
     return null;
@@ -348,7 +423,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       (snapshot) => {
         const ticketsList: Ticket[] = [];
         snapshot.forEach((doc) => {
-          ticketsList.push(doc.data() as Ticket);
+          const t = doc.data() as Ticket;
+          ticketsList.push({
+            ...t,
+            kategori: cleanCategory(t.kategori),
+          });
         });
         setTickets(ticketsList.length > 0 ? ticketsList : INITIAL_TICKETS);
       },
@@ -437,14 +516,51 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     topikMasalah: 'all',
   });
 
-  // Sync to LocalStorage with safeStorage
+  // Sync currentUser session exclusively to sessionStorage
   useEffect(() => {
     if (currentUser) {
-      safeStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(currentUser));
+      safeSessionStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(currentUser));
     } else {
-      safeStorage.removeItem(STORAGE_KEYS.USER);
+      safeSessionStorage.removeItem(STORAGE_KEYS.USER);
+      safeSessionStorage.removeItem(STORAGE_KEYS.SESSION_START);
+      safeSessionStorage.removeItem(STORAGE_KEYS.SESSION_EXPIRES);
     }
+    // Strictly remove user from localStorage to ensure closing browser forces logout
+    safeStorage.removeItem(STORAGE_KEYS.USER);
   }, [currentUser]);
+
+  // Session monitor: Automatically logs out when 60 minutes limit is reached or on browser focus
+  useEffect(() => {
+    if (!currentUser || !sessionExpiresAt) return;
+
+    const checkSessionExpiration = () => {
+      const now = Date.now();
+      if (now >= sessionExpiresAt) {
+        logout('Sesi login Anda telah berakhir (maksimal 60 menit). Silakan masuk kembali.');
+      }
+    };
+
+    // Initial check
+    checkSessionExpiration();
+
+    // Check periodically every 5 seconds
+    const interval = setInterval(checkSessionExpiration, 5000);
+
+    // Also check when tab becomes active / window receives focus
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible') {
+        checkSessionExpiration();
+      }
+    };
+    window.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    window.addEventListener('focus', handleVisibilityOrFocus);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+    };
+  }, [currentUser, sessionExpiresAt]);
 
   useEffect(() => {
     safeStorage.setItem(STORAGE_KEYS.USERS_LIST, JSON.stringify(users));
@@ -674,6 +790,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (expectedPass !== trimmedPass) {
         return { success: false, message: 'Username atau kata sandi tidak sesuai. Silakan periksa kembali.' };
       }
+      const expiresAt = Date.now() + MAX_SESSION_DURATION_MS;
+      setSessionExpiresAt(expiresAt);
+      setSessionExpiredMessage(null);
+      safeSessionStorage.setItem(STORAGE_KEYS.SESSION_START, Date.now().toString());
+      safeSessionStorage.setItem(STORAGE_KEYS.SESSION_EXPIRES, expiresAt.toString());
+      safeSessionStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(found));
+      safeStorage.removeItem(STORAGE_KEYS.USER);
       setCurrentUser(found);
       setActiveTab('dashboard');
       return { success: true };
@@ -681,6 +804,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     if (trimmedUser === 'senada' && trimmedPass === '150bisa') {
       const adminUser: User = INITIAL_USERS[0];
+      const expiresAt = Date.now() + MAX_SESSION_DURATION_MS;
+      setSessionExpiresAt(expiresAt);
+      setSessionExpiredMessage(null);
+      safeSessionStorage.setItem(STORAGE_KEYS.SESSION_START, Date.now().toString());
+      safeSessionStorage.setItem(STORAGE_KEYS.SESSION_EXPIRES, expiresAt.toString());
+      safeSessionStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(adminUser));
+      safeStorage.removeItem(STORAGE_KEYS.USER);
       setCurrentUser(adminUser);
       setActiveTab('dashboard');
       return { success: true };
@@ -689,10 +819,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return { success: false, message: 'Username atau kata sandi tidak sesuai. Silakan periksa kembali.' };
   };
 
-  const logout = () => {
+  const logout = (customMessage?: string) => {
     setCurrentUser(null);
+    setSessionExpiresAt(null);
+    safeSessionStorage.removeItem(STORAGE_KEYS.USER);
+    safeSessionStorage.removeItem(STORAGE_KEYS.SESSION_START);
+    safeSessionStorage.removeItem(STORAGE_KEYS.SESSION_EXPIRES);
     safeStorage.removeItem(STORAGE_KEYS.USER);
+    if (customMessage) {
+      setSessionExpiredMessage(customMessage);
+    }
     setActiveTab('dashboard');
+  };
+
+  const clearSessionExpiredMessage = () => {
+    setSessionExpiredMessage(null);
   };
 
   const changePassword = (oldPass: string, newPass: string): { success: boolean; message: string } => {
@@ -714,10 +855,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return { success: true, message: 'Password Anda berhasil diperbarui.' };
   };
 
-  // Switch role convenience with active tab guard
+  // Switch role convenience with active tab guard & session refresh
   const switchRole = (role: User['role']) => {
     const targetUser = users.find((u) => u.role === role);
     if (targetUser) {
+      const expiresAt = Date.now() + MAX_SESSION_DURATION_MS;
+      setSessionExpiresAt(expiresAt);
+      safeSessionStorage.setItem(STORAGE_KEYS.SESSION_START, Date.now().toString());
+      safeSessionStorage.setItem(STORAGE_KEYS.SESSION_EXPIRES, expiresAt.toString());
+      safeSessionStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(targetUser));
+      safeStorage.removeItem(STORAGE_KEYS.USER);
       setCurrentUser(targetUser);
       const roleAllowedTabs: Record<UserRole, string[]> = {
         admin: ['dashboard', 'kalibrasi', 'users-management'],
@@ -860,9 +1007,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           if (sheetIdMatch) {
             const sheetId = sheetIdMatch[1];
             try {
+              const controller = new AbortController();
+              const timeoutId = setTimeout(() => controller.abort(), 30000);
               const gvizDirect = await fetch(
-                `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&gid=${gid}`
+                `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&gid=${gid}`,
+                { signal: controller.signal }
               );
+              clearTimeout(timeoutId);
               const gvizText = await gvizDirect.text();
               if (
                 gvizDirect.ok &&
@@ -932,11 +1083,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const itemsToSet: { path: string; id: string; data: Ticket }[] = [];
 
         for (const newT of parsed.data) {
+          const oldT = existingMap.get(newT.nomorTiket);
+          const normalizedT: Ticket = {
+            ...newT,
+            kategori: cleanCategory(newT.kategori),
+            sampled: oldT ? Boolean(oldT.sampled) : false,
+            samplingId: oldT?.samplingId,
+          };
           if (!existingMap.has(newT.nomorTiket)) {
-            existingMap.set(newT.nomorTiket, newT);
             addedCount++;
-            itemsToSet.push({ path: 'tickets', id: newT.nomorTiket, data: newT });
           }
+          existingMap.set(newT.nomorTiket, normalizedT);
+          itemsToSet.push({ path: 'tickets', id: newT.nomorTiket, data: normalizedT });
         }
 
         if (itemsToSet.length > 0) {
@@ -1242,6 +1400,257 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     safeSetDoc(doc(db, 'tickets', ticket.nomorTiket), { ...ticket, sampled: true, samplingId }, { merge: true });
 
     return newEvaluation;
+  };
+
+  const deleteEvaluationsByPeriod = async (period: string) => {
+    try {
+      let toDelete: SamplingEvaluation[] = [];
+      if (period === 'all') {
+        toDelete = evaluations;
+      } else {
+        toDelete = evaluations.filter((e) => e.tanggalSampling && e.tanggalSampling.startsWith(period));
+      }
+
+      if (toDelete.length === 0) {
+        return { success: false, message: 'Tidak ada data evaluasi pada periode tersebut.', count: 0 };
+      }
+
+      const ticketNumbersToReset = new Set(toDelete.map((e) => e.nomorTiket));
+      const docRefs = toDelete.map((e) => doc(db, 'evaluations', e.id));
+      await batchDeleteDocs(docRefs);
+
+      const deleteIds = new Set(toDelete.map((e) => e.id));
+      setEvaluations((prev) => prev.filter((e) => !deleteIds.has(e.id)));
+
+      setTickets((prev) =>
+        prev.map((t) => {
+          if (ticketNumbersToReset.has(t.nomorTiket)) {
+            const updated = { ...t, sampled: false, samplingId: undefined };
+            safeSetDoc(doc(db, 'tickets', t.nomorTiket), updated, { merge: true });
+            return updated;
+          }
+          return t;
+        })
+      );
+
+      return {
+        success: true,
+        message: `Berhasil menghapus ${toDelete.length} data evaluasi/sampling untuk periode ${period === 'all' ? 'Semua Periode' : period}.`,
+        count: toDelete.length,
+      };
+    } catch (e: any) {
+      handleFirestoreError(e, 'deleteEvaluationsByPeriod', null);
+      return { success: false, message: e?.message || 'Gagal menghapus data evaluasi.', count: 0 };
+    }
+  };
+
+  const importEvaluationsFromExcel = async (
+    file: File,
+    onProgress?: (percent: number, stepText: string) => void
+  ): Promise<{ success: boolean; message: string; count?: number; error?: string }> => {
+    try {
+      onProgress?.(20, 'Membaca berkas Excel history & nilai akhir...');
+      const arrayBuffer = await file.arrayBuffer();
+      const workbook = XLSX.read(arrayBuffer, { type: 'array', cellDates: true });
+      const sheetName = workbook.SheetNames[0];
+      if (!sheetName) {
+        return { success: false, message: 'File Excel tidak memiliki lembar kerja (sheet).' };
+      }
+      const sheet = workbook.Sheets[sheetName];
+      const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+      if (!rows || rows.length < 2) {
+        return { success: false, message: 'File Excel kosong atau tidak memiliki baris data.' };
+      }
+
+      const newEvaluations: SamplingEvaluation[] = [];
+      const newTickets: Ticket[] = [];
+
+      for (let r = 1; r < rows.length; r++) {
+        const row = rows[r];
+        if (!row || !Array.isArray(row) || row.every((c) => c === '' || c === undefined || c === null)) {
+          continue;
+        }
+
+        // Helper to parse dd/mm/yyyy or excel date
+        const parseDmyDate = (val: any): string => {
+          if (!val) return new Date().toISOString().slice(0, 10);
+          if (val instanceof Date && !isNaN(val.getTime())) {
+            return val.toISOString().slice(0, 10);
+          }
+          if (typeof val === 'number') {
+            try {
+              const parsed = XLSX.SSF.parse_date_code(val);
+              if (parsed) {
+                const y = parsed.y;
+                const m = String(parsed.m).padStart(2, '0');
+                const d = String(parsed.d).padStart(2, '0');
+                return `${y}-${m}-${d}`;
+              }
+            } catch {
+              const date = new Date(Math.round((val - 25569) * 86400 * 1000));
+              if (!isNaN(date.getTime())) return date.toISOString().slice(0, 10);
+            }
+          }
+          const str = String(val).trim();
+          // Check dd/mm/yyyy or dd-mm-yyyy
+          const matchDmy = str.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
+          if (matchDmy) {
+            const d = matchDmy[1].padStart(2, '0');
+            const m = matchDmy[2].padStart(2, '0');
+            const y = matchDmy[3];
+            return `${y}-${m}-${d}`;
+          }
+          if (/^\d{4}-\d{2}-\d{2}/.test(str)) {
+            return str.slice(0, 10);
+          }
+          const parsed = new Date(str);
+          if (!isNaN(parsed.getTime())) {
+            return parsed.toISOString().slice(0, 10);
+          }
+          return new Date().toISOString().slice(0, 10);
+        };
+
+        const nomorTiket = String(row[0] || '').trim() || `TKT-${new Date().getFullYear()}-${String(r).padStart(4, '0')}`;
+        const tanggalTiket = parseDmyDate(row[1]);
+        const kategori = cleanCategory(row[2] || 'Informasi');
+        const pokokMasalah = String(row[3] || 'Pelayanan Faskes').trim();
+        const topikMasalah = String(row[4] || 'Layanan Umum').trim();
+        const isiKeluhan = String(row[5] || 'Keluhan peserta dari upload history.').trim();
+        const isiJawaban = String(row[6] || 'Jawaban petugas dari upload history.').trim();
+        const rating = Number(row[7]) || 5;
+        const namaPetugas = String(row[8] || 'Petugas Layanan').trim();
+        const tanggalSampling = parseDmyDate(row[9]);
+        const qaName = String(row[10] || currentUser?.name || 'Quality Assurance').trim();
+
+        const scores: IndicatorScore[] = indicators.map((ind, idx) => {
+          const cellVal = row[11 + idx];
+          let scoreNum = 100;
+          if (cellVal !== undefined && cellVal !== '') {
+            const strVal = String(cellVal).trim().toUpperCase();
+            if (strVal === 'N/A' || strVal === 'NA' || strVal === '-') {
+              scoreNum = 100; // N/A default or max weight
+            } else {
+              const num = Number(cellVal);
+              if (!isNaN(num)) {
+                // If value is 0, 1, 2, 3 based on indicator scale
+                if (num === 0) scoreNum = 0;
+                else if (num === 1) scoreNum = 33;
+                else if (num === 2) scoreNum = 67;
+                else if (num === 3) scoreNum = 100;
+                else if (num <= 3) {
+                  scoreNum = Math.round((num / 3) * 100);
+                } else if (num <= 5) {
+                  scoreNum = Math.round((num / 5) * 100);
+                } else {
+                  scoreNum = Math.min(100, Math.max(0, num));
+                }
+              }
+            }
+          }
+          return {
+            indicatorId: ind.id,
+            score: scoreNum,
+            notes: `Nilai dari upload Excel: ${cellVal ?? scoreNum}`,
+          };
+        });
+
+        const catatan = String(row[22] || 'Diimpor dari Excel History & Nilai Akhir.').trim();
+
+        const totalBobot = indicators.reduce((acc, i) => acc + (Number(i.bobot) || 0), 0) || 100;
+        const weightedSum = scores.reduce((acc, s) => {
+          const ind = indicators.find((i) => i.id === s.indicatorId);
+          return acc + (s.score * (ind?.bobot || 0));
+        }, 0);
+        const nilaiAwal = Math.round((weightedSum / totalBobot) * 10) / 10;
+
+        const petugasObj = users.find((u) => u.name.toLowerCase() === namaPetugas.toLowerCase());
+        const petugasTeam = petugasObj?.team || 'TIM 1';
+        const samplingId = `SMP-IMP-${Date.now()}-${r}`;
+
+        const ticket: Ticket = {
+          nomorTiket,
+          tanggalTiket,
+          kategori,
+          pokokMasalah,
+          topikMasalah,
+          isiKeluhan,
+          isiJawaban,
+          rating,
+          namaPetugas,
+          sampled: true,
+          samplingId,
+        };
+
+        const newEval: SamplingEvaluation = {
+          id: samplingId,
+          nomorTiket,
+          ticket,
+          qaId: 'qa-imported',
+          qaName,
+          petugasTeam,
+          tanggalSampling,
+          scores,
+          nilaiAwal,
+          catatanAwalQA: catatan,
+          status: 'SELESAI_DITERIMA',
+          nilaiFinal: nilaiAwal,
+          isCalibrated: false,
+          history: [
+            {
+              timestamp: `${tanggalSampling} 09:00:00`,
+              actor: qaName,
+              role: 'Quality Assurance',
+              action: 'Import data history dan nilai akhir via Excel',
+              note: `Catatan QA (${qaName}): ${catatan}. Nilai Final: ${nilaiAwal}. Tercatat ke Petugas (${namaPetugas}) dan Team Leader (${petugasTeam}).`,
+            },
+            {
+              timestamp: `${tanggalSampling} 10:00:00`,
+              actor: namaPetugas,
+              role: 'Petugas',
+              action: 'Menerima dan menyetujui hasil sampling',
+              note: `Petugas (${namaPetugas}) menyetujui hasil nilai akhir ${nilaiAwal}.`,
+            }
+          ]
+        };
+
+        newEvaluations.push(newEval);
+        newTickets.push(ticket);
+      }
+
+      if (newEvaluations.length === 0) {
+        return { success: false, message: 'Tidak ada baris data valid yang ditemukan pada file Excel.' };
+      }
+
+      setEvaluations((prev) => [...newEvaluations, ...prev]);
+      setTickets((prev) => {
+        const map = new Map(prev.map((t) => [t.nomorTiket, t]));
+        newTickets.forEach((t) => map.set(t.nomorTiket, t));
+        return Array.from(map.values());
+      });
+
+      const batchItems = newEvaluations.map((e) => ({
+        path: 'evaluations',
+        id: e.id,
+        data: e,
+      }));
+      await batchSetDocs(batchItems);
+
+      const ticketBatchItems = newTickets.map((t) => ({
+        path: 'tickets',
+        id: t.nomorTiket,
+        data: t,
+      }));
+      await batchSetDocs(ticketBatchItems);
+
+      return {
+        success: true,
+        message: `Berhasil mengimpor ${newEvaluations.length} data riwayat dan nilai akhir dari Excel.`,
+        count: newEvaluations.length,
+      };
+    } catch (err: any) {
+      console.error('Import evaluations error:', err);
+      return { success: false, message: err?.message || 'Gagal membaca atau memproses berkas Excel.' };
+    }
   };
 
   // Petugas Action: Accept Score
@@ -1570,6 +1979,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         login,
         logout,
         switchRole,
+        sessionExpiresAt,
+        sessionExpiredMessage,
+        clearSessionExpiredMessage,
         users,
         addUser,
         updateUser,
@@ -1588,6 +2000,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         importExcelFile,
         loadSampleSheetData,
         importCSVText,
+        importEvaluationsFromExcel,
         clearAllData,
         bulkUsersCreate,
         handleBulkCreate,
@@ -1597,6 +2010,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         submitPetugasAcceptance,
         submitPetugasSanggahan,
         submitQaKeputusanAkhir,
+        deleteEvaluationsByPeriod,
         calibrations,
         createCalibration,
         uncalibratedEvaluations,
