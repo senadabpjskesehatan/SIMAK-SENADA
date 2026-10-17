@@ -530,6 +530,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }, [currentUser]);
 
   // Session monitor: Automatically logs out when 60 minutes limit is reached or on browser focus
+  const resetSessionTimer = React.useCallback(() => {
+    const now = Date.now();
+    const newExpiresAt = now + MAX_SESSION_DURATION_MS;
+    setSessionExpiresAt(newExpiresAt);
+    safeSessionStorage.setItem(STORAGE_KEYS.SESSION_EXPIRES, newExpiresAt.toString());
+  }, []);
+
   useEffect(() => {
     if (!currentUser || !sessionExpiresAt) return;
 
@@ -555,12 +562,25 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     window.addEventListener('visibilitychange', handleVisibilityOrFocus);
     window.addEventListener('focus', handleVisibilityOrFocus);
 
+    // Activity tracker
+    let lastActivityTime = 0;
+    const handleActivity = () => {
+      const now = Date.now();
+      if (now - lastActivityTime > 10000) { // Throttle resets to max once per 10s
+        lastActivityTime = now;
+        resetSessionTimer();
+      }
+    };
+    const activityEvents = ['mousedown', 'keydown', 'scroll', 'touchstart'];
+    activityEvents.forEach(event => window.addEventListener(event, handleActivity));
+
     return () => {
       clearInterval(interval);
       window.removeEventListener('visibilitychange', handleVisibilityOrFocus);
       window.removeEventListener('focus', handleVisibilityOrFocus);
+      activityEvents.forEach(event => window.removeEventListener(event, handleActivity));
     };
-  }, [currentUser, sessionExpiresAt]);
+  }, [currentUser, sessionExpiresAt, resetSessionTimer]);
 
   useEffect(() => {
     safeStorage.setItem(STORAGE_KEYS.USERS_LIST, JSON.stringify(users));

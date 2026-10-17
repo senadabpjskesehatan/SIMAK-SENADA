@@ -102,7 +102,27 @@ export const INITIAL_USERS: User[] = [
   { id: 'USR-260516', username: '260516', name: 'PUTRI VADIA DHAMAYANTI', role: 'petugas', nip: '260516', password: 'kualitas99', email: '260516@bpjskesehatan.go.id', team: '4' },
 ];
 
-export const INITIAL_INDICATORS: Indicator[] = [];
+export const DEFAULT_NILAI_OPTIONS: import('../types').IndicatorNilaiOption[] = [
+  { nilai: 'N/A', label: 'Not Applicable (Tidak Berlaku)', enabled: true, referensiKetentuan: 'Indikator tidak relevan atau tidak berlaku pada kasus tiket ini.' },
+  { nilai: '0', label: 'Tidak Sesuai / Tidak Dilakukan', enabled: true, referensiKetentuan: 'Prosedur atau standar pelayanan sama sekali tidak dilakukan.' },
+  { nilai: '1', label: 'Kurang Sesuai', enabled: true, referensiKetentuan: 'Dilakukan sebagian kecil atau kurang dari standar ketentuan pelayanan.' },
+  { nilai: '2', label: 'Cukup Sesuai', enabled: true, referensiKetentuan: 'Sebagian besar standar ketentuan terpenuhi dengan catatan minor.' },
+  { nilai: '3', label: 'Sangat Sesuai / Sempurna', enabled: true, referensiKetentuan: 'Seluruh standar ketentuan terpenuhi dengan sangat baik dan sempurna.' },
+];
+
+export const INITIAL_INDICATORS: Indicator[] = [
+  { id: 'ind-1', nama: 'Salam Pembuka', bobot: 9, deskripsi: 'Petugas menyapa dengan sopan dan ramah di awal percakapan.', skalaMin: 0, skalaMax: 100, pilihanNilai: DEFAULT_NILAI_OPTIONS },
+  { id: 'ind-2', nama: 'Menyapa Peserta', bobot: 9, deskripsi: 'Petugas menyebutkan nama peserta jika tersedia.', skalaMin: 0, skalaMax: 100, pilihanNilai: DEFAULT_NILAI_OPTIONS },
+  { id: 'ind-3', nama: 'Pemilihan Topik Masalah', bobot: 9, deskripsi: 'Petugas mengidentifikasi dan mengonfirmasi topik masalah dengan benar.', skalaMin: 0, skalaMax: 100, pilihanNilai: DEFAULT_NILAI_OPTIONS },
+  { id: 'ind-4', nama: 'Analisis', bobot: 9, deskripsi: 'Petugas melakukan analisis masalah dengan tepat.', skalaMin: 0, skalaMax: 100, pilihanNilai: DEFAULT_NILAI_OPTIONS },
+  { id: 'ind-5', nama: 'Akurasi Informasi', bobot: 10, deskripsi: 'Petugas memberikan informasi yang akurat sesuai kebijakan.', skalaMin: 0, skalaMax: 100, pilihanNilai: DEFAULT_NILAI_OPTIONS },
+  { id: 'ind-6', nama: 'Edukasi Tambahan', bobot: 9, deskripsi: 'Petugas memberikan edukasi tambahan yang relevan.', skalaMin: 0, skalaMax: 100, pilihanNilai: DEFAULT_NILAI_OPTIONS },
+  { id: 'ind-7', nama: 'Kesesuaian Tindak Lanjut', bobot: 9, deskripsi: 'Solusi yang diberikan sesuai dengan prosedur tindak lanjut.', skalaMin: 0, skalaMax: 100, pilihanNilai: DEFAULT_NILAI_OPTIONS },
+  { id: 'ind-8', nama: 'Pemilihan Kata Dan Bahasa', bobot: 9, deskripsi: 'Petugas menggunakan bahasa yang baik, benar, dan sopan.', skalaMin: 0, skalaMax: 100, pilihanNilai: DEFAULT_NILAI_OPTIONS },
+  { id: 'ind-9', nama: 'Kemampuan Presentasi', bobot: 9, deskripsi: 'Petugas menyampaikan penjelasan dengan jelas dan mudah dimengerti.', skalaMin: 0, skalaMax: 100, pilihanNilai: DEFAULT_NILAI_OPTIONS },
+  { id: 'ind-10', nama: 'Edukasi Rating', bobot: 9, deskripsi: 'Petugas memberikan edukasi mengenai sistem penilaian/rating.', skalaMin: 0, skalaMax: 100, pilihanNilai: DEFAULT_NILAI_OPTIONS },
+  { id: 'ind-11', nama: 'Salam Penutup', bobot: 9, deskripsi: 'Petugas menutup percakapan dengan sopan dan profesional.', skalaMin: 0, skalaMax: 100, pilihanNilai: DEFAULT_NILAI_OPTIONS },
+];
 export const INITIAL_TICKETS: Ticket[] = [
   {
     nomorTiket: 'TKT-2025-0001',
@@ -179,11 +199,5 @@ export const INITIAL_TICKETS: Ticket[] = [
 ];
 export const INITIAL_EVALUATIONS: SamplingEvaluation[] = [];
 export const INITIAL_CALIBRATIONS: CalibrationRecord[] = [];
-export const DEFAULT_NILAI_OPTIONS: import('../types').IndicatorNilaiOption[] = [
-  { nilai: 'N/A', label: 'Not Applicable (Tidak Berlaku)', enabled: true, referensiKetentuan: 'Indikator tidak relevan atau tidak berlaku pada kasus tiket ini.' },
-  { nilai: '0', label: 'Tidak Sesuai / Tidak Dilakukan', enabled: true, referensiKetentuan: 'Prosedur atau standar pelayanan sama sekali tidak dilakukan.' },
-  { nilai: '1', label: 'Kurang Sesuai', enabled: true, referensiKetentuan: 'Dilakukan sebagian kecil atau kurang dari standar ketentuan pelayanan.' },
-  { nilai: '2', label: 'Cukup Sesuai', enabled: true, referensiKetentuan: 'Sebagian besar standar ketentuan terpenuhi dengan catatan minor.' },
-  { nilai: '3', label: 'Sangat Sesuai / Sempurna', enabled: true, referensiKetentuan: 'Seluruh standar ketentuan terpenuhi dengan sangat baik dan sempurna.' },
-];
+
 
