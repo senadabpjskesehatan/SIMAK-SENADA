@@ -903,6 +903,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const addIndicator = async (newInd: Omit<Indicator, 'id'>) => {
     const id = `IND-${String(indicators.length + 1).padStart(2, '0')}-${Date.now().toString().slice(-4)}`;
     const indObj = { ...newInd, id };
+    setIndicators((prev) => [...prev, indObj]);
     try {
       await safeSetDoc(doc(db, 'indicators', id), indObj);
     } catch (e) {
@@ -911,6 +912,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const updateIndicator = async (id: string, updated: Partial<Indicator>) => {
+    setIndicators((prev) => prev.map((ind) => (ind.id === id ? { ...ind, ...updated } : ind)));
     try {
       await safeSetDoc(doc(db, 'indicators', id), updated, { merge: true });
     } catch (e) {
@@ -919,6 +921,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const deleteIndicator = async (id: string) => {
+    setIndicators((prev) => prev.filter((ind) => ind.id !== id));
     try {
       await deleteDoc(doc(db, 'indicators', id));
     } catch (e) {
