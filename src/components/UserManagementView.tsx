@@ -162,12 +162,16 @@ export const UserManagementView: React.FC = () => {
     setUserToDelete(user);
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!userToDelete) return;
-    deleteUser(userToDelete.id);
-    setSuccessToast(`User ${userToDelete.name} berhasil dihapus.`);
+    const result = await deleteUser(userToDelete.id);
+    if (result.success) {
+      setSuccessToast(`User ${userToDelete.name} berhasil dihapus.`);
+      setTimeout(() => setSuccessToast(null), 4000);
+    } else {
+      setFormError(result.error || 'Gagal menghapus pengguna.');
+    }
     setUserToDelete(null);
-    setTimeout(() => setSuccessToast(null), 4000);
   };
 
   const mapRole = (roleStr: string): UserRole => {
@@ -192,7 +196,7 @@ export const UserManagementView: React.FC = () => {
     if (!fileToUpload) return;
     setUploadStatus("Memproses file...");
     const reader = new FileReader();
-    reader.onload = (evt) => {
+    reader.onload = async (evt) => {
       try {
         const data = evt.target?.result;
         const workbook = XLSX.read(data, { type: "binary" });
@@ -201,11 +205,11 @@ export const UserManagementView: React.FC = () => {
         const usersToCreate: Omit<User, "id">[] = jsonData.map((row: any) => ({
           name: String(row["Nama"] || row["nama"] || "").trim(),
           nip: String(row["NPP"] || row["npp"] || row["NIP"] || row["nip"] || "").trim(),
-          username: String(row["User"] || row["user"] || row["username"] || "").trim().toLowerCase(),
-          password: String(row["Password"] || row["password"] || "123456").trim(),
+          username: String(row["User"] || row["user"] || row["username"] || row["NPP"] || row["npp"] || "").trim().toLowerCase(),
+          password: String(row["Password"] || row["password"] || "kualitas99").trim(),
           role: mapRole(String(row["Hak Akses"] || row["hak akses"] || row["role"] || "")),
-          team: row["TIM"] || row["tim"] || row["Team"] || undefined,
-          email: `${String(row["User"] || row["user"] || "user").trim().toLowerCase()}@bpjskesehatan.go.id`,
+          team: row["TIM"] || row["tim"] || row["Team"] ? `TIM ${String(row["TIM"] || row["tim"] || row["Team"]).replace(/TIM\s*/i, '')}` : undefined,
+          email: `${String(row["User"] || row["user"] || row["NPP"] || "user").trim().toLowerCase()}@bpjskesehatan.go.id`,
           division: "Unit Layanan Informasi",
         })).filter(u => u.name && u.username);
 
@@ -214,13 +218,14 @@ export const UserManagementView: React.FC = () => {
           return;
         }
 
-        bulkUsersCreate(usersToCreate);
+        await bulkUsersCreate(usersToCreate);
         setUploadStatus(`Berhasil mengimpor ${usersToCreate.length} pengguna.`);
+        setCurrentPage(1);
         setTimeout(() => {
           setUploadStatus(null);
           setIsModalOpen(false);
           setFileToUpload(null);
-        }, 2500);
+        }, 2000);
       } catch (err) {
         setUploadStatus("Gagal memproses file. Pastikan format kolom sesuai.");
       }
@@ -228,63 +233,78 @@ export const UserManagementView: React.FC = () => {
     reader.readAsBinaryString(fileToUpload);
   };
 
-  const handleSubmitForm = (e: React.FormEvent) => {
+  const handleSubmitForm = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError('');
 
-    if (!formData.name.trim() || !formData.username.trim() || !formData.nip.trim()) {
-      setFormError('Nama, NPP/NPPT (NIP), dan username wajib diisi.');
+    const finalName = formData.name.trim();
+    const finalNip = formData.nip.trim();
+    // Jika username tidak diisi khusus, otomatis gunakan nomor NPP/NIP (standar BPJS)
+    const finalUsername = (formData.username.trim() || finalNip).toLowerCase();
+
+    if (!finalName || !finalNip) {
+      setFormError('Nama lengkap dan NPP/NPPT (NIP) wajib diisi.');
       return;
     }
 
-    if (!editingUser && !formData.password.trim()) {
-      setFormError('Password wajib diisi untuk pengguna baru.');
-      return;
-    }
+    // Default password BPJS jika dikosongkan
+    const defaultPassword = (formData.role === 'admin' || formData.role === 'pusat') ? '150bisa' : 'kualitas99';
+    const finalPassword = formData.password.trim() || (editingUser ? (editingUser.password || defaultPassword) : defaultPassword);
 
-    // Check duplicate username if adding or changing
+    // Cek duplikasi username / ID user
     const duplicate = users.find(
       (u) =>
-        u.username.toLowerCase() === formData.username.trim().toLowerCase() &&
+        u.username.toLowerCase() === finalUsername &&
         u.id !== editingUser?.id
     );
 
     if (duplicate) {
-      setFormError('Username tersebut sudah digunakan oleh user lain.');
+      setFormError(`Username/NPP "${finalUsername}" sudah terdaftar pada pengguna "${duplicate.name}".`);
       return;
     }
 
-    const emailGenerated = formData.email.trim() || `${formData.username.trim().toLowerCase()}@bpjskesehatan.go.id`;
+    const emailGenerated = formData.email.trim() || `${finalUsername}@bpjskesehatan.go.id`;
     const includeTeam = formData.role === 'petugas' || formData.role === 'team_leader';
+    
+    let result: { success: boolean; error?: string };
 
     if (editingUser) {
-      updateUser(editingUser.id, {
-        name: formData.name.trim(),
-        username: formData.username.trim().toLowerCase(),
-        role: formData.role,
-        email: emailGenerated.toLowerCase(),
-        division: formData.division.trim(),
-        nip: formData.nip.trim(),
-        password: formData.password ? formData.password.trim() : editingUser.password,
-        team: includeTeam ? formData.team : undefined,
-      });
-      setSuccessToast(`Data & hak akses user ${formData.name} berhasil diperbarui.`);
-    } else {
-      addUser({
-        name: formData.name.trim(),
-        username: formData.username.trim().toLowerCase(),
+      result = await updateUser(editingUser.id, {
+        name: finalName,
+        username: finalUsername,
         role: formData.role,
         email: emailGenerated.toLowerCase(),
         division: formData.division.trim() || 'Unit Layanan Informasi',
-        nip: formData.nip.trim(),
-        password: formData.password.trim(),
+        nip: finalNip,
+        password: finalPassword,
         team: includeTeam ? formData.team : undefined,
       });
-      setSuccessToast(`User baru ${formData.name} berhasil ditambahkan dengan hak akses ${formData.role.toUpperCase()}.`);
+      if (result.success) {
+        setSuccessToast(`Data & hak akses user ${finalName} berhasil diperbarui.`);
+      }
+    } else {
+      result = await addUser({
+        name: finalName,
+        username: finalUsername,
+        role: formData.role,
+        email: emailGenerated.toLowerCase(),
+        division: formData.division.trim() || 'Unit Layanan Informasi',
+        nip: finalNip,
+        password: finalPassword,
+        team: includeTeam ? formData.team : undefined,
+      });
+      if (result.success) {
+        setSuccessToast(`User baru ${finalName} (${finalUsername}) berhasil ditambahkan dengan hak akses ${formData.role.toUpperCase()}.`);
+        setCurrentPage(1);
+      }
     }
 
-    setIsModalOpen(false);
-    setTimeout(() => setSuccessToast(null), 4000);
+    if (result.success) {
+      setIsModalOpen(false);
+      setTimeout(() => setSuccessToast(null), 4000);
+    } else {
+      setFormError(result.error || 'Terjadi kesalahan saat menyimpan data.');
+    }
   };
 
   if (currentUser?.role !== 'admin') {
@@ -716,7 +736,7 @@ export const UserManagementView: React.FC = () => {
               {/* Nama */}
               <div>
                 <label className="block font-bold text-slate-700 mb-1">
-                  Nama : *
+                  Nama Lengkap : *
                 </label>
                 <input
                   type="text"
@@ -731,14 +751,21 @@ export const UserManagementView: React.FC = () => {
               {/* NPP/NPPT */}
               <div>
                 <label className="block font-bold text-slate-700 mb-1">
-                  NPP/NPPT : *
+                  NPP/NPPT (NIP) : *
                 </label>
                 <input
                   type="text"
                   required
                   value={formData.nip}
-                  onChange={(e) => setFormData({ ...formData, nip: e.target.value })}
-                  placeholder="misal: 199605202020121008"
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setFormData((prev) => ({
+                      ...prev,
+                      nip: val,
+                      username: (!prev.username || prev.username === prev.nip.toLowerCase()) ? val.toLowerCase() : prev.username,
+                    }));
+                  }}
+                  placeholder="misal: 230299 atau 199605202020121008"
                   className="w-full p-2.5 rounded-lg border border-slate-300 bg-white font-mono focus:ring-2 focus:ring-teal-500"
                 />
               </div>
@@ -746,29 +773,31 @@ export const UserManagementView: React.FC = () => {
               {/* User (Username) */}
               <div>
                 <label className="block font-bold text-slate-700 mb-1">
-                  user : *
+                  Username / ID Login : *
                 </label>
                 <input
                   type="text"
                   required
                   value={formData.username}
-                  onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-                  placeholder="misal: sitiaminah"
+                  onChange={(e) => setFormData({ ...formData, username: e.target.value.toLowerCase() })}
+                  placeholder="Otomatis mengikuti NPP atau masukkan username khusus"
                   className="w-full p-2.5 rounded-lg border border-slate-300 bg-white font-mono focus:ring-2 focus:ring-teal-500"
                 />
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Digunakan untuk masuk ke sistem (bisa menggunakan nomor NPP atau username).
+                </p>
               </div>
 
               {/* Password */}
               <div>
                 <label className="block font-bold text-slate-700 mb-1">
-                  password : {editingUser ? '(Kosongkan jika tidak diubah)' : '*'}
+                  Password : {editingUser ? '(Kosongkan jika tidak diubah)' : '(Opsional, default: kualitas99 / 150bisa)'}
                 </label>
                 <input
                   type="password"
-                  required={!editingUser}
                   value={formData.password}
                   onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                  placeholder={editingUser ? '•••••••• (Tetap sama jika kosong)' : 'Masukkan kata sandi'}
+                  placeholder={editingUser ? '•••••••• (Tetap sama jika kosong)' : 'Kosongkan untuk otomatis: kualitas99 (atau 150bisa)'}
                   className="w-full p-2.5 rounded-lg border border-slate-300 bg-white font-mono focus:ring-2 focus:ring-teal-500"
                 />
               </div>
@@ -776,7 +805,7 @@ export const UserManagementView: React.FC = () => {
               {/* Hak Akses */}
               <div>
                 <label className="block font-bold text-slate-700 mb-1">
-                  Hak askes : *
+                  Hak Akses Sistem : *
                 </label>
                 <select
                   value={formData.role}

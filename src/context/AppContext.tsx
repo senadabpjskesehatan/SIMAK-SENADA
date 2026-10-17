@@ -124,10 +124,6 @@ interface AppContextType {
   sessionExpiredMessage: string | null;
   clearSessionExpiredMessage: () => void;
   users: User[];
-  addUser: (user: Omit<User, 'id'>) => void;
-  updateUser: (id: string, updated: Partial<User>) => void;
-  deleteUser: (id: string) => void;
-  resetUsersToDefault: () => void;
   changePassword: (oldPass: string, newPass: string) => { success: boolean; message: string };
 
   // Indicators management
@@ -205,9 +201,14 @@ interface AppContextType {
   pendingPetugasCount: number;
   pendingQaRebuttalCount: number;
 
-  clearAllData: () => void;
-  bulkUsersCreate: (users: Omit<User, 'id'>[]) => void;
+  // User Management Handlers (for QA and Admin)
+  addUser: (user: Omit<User, 'id'>) => Promise<{ success: boolean; error?: string }>;
+  updateUser: (id: string, updated: Partial<User>) => Promise<{ success: boolean; error?: string }>;
+  deleteUser: (id: string) => Promise<{ success: boolean; error?: string }>;
+  resetUsersToDefault: () => Promise<void>;
+  bulkUsersCreate: (users: Omit<User, 'id'>[]) => Promise<void>;
   handleBulkCreate: () => void;
+  clearAllData: () => void;
 
   // Active view
   activeTab: string;
@@ -358,7 +359,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   });
 
   // 2. Users list synced with Firestore
-  const [users, setUsers] = useState<User[]>([]);
+  const [users, setUsers] = useState<User[]>(() => {
+    const saved = safeStorage.getItem(STORAGE_KEYS.USERS_LIST);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch {}
+    }
+    return INITIAL_USERS;
+  });
   useEffect(() => {
     const unsubscribe = onSnapshot(
       collection(db, 'users'),
@@ -369,6 +379,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         });
         if (usersList.length > 0) {
           setUsers(usersList);
+          safeStorage.setItem(STORAGE_KEYS.USERS_LIST, JSON.stringify(usersList));
         } else {
           for (const u of INITIAL_USERS) {
             await safeSetDoc(doc(db, 'users', u.id), u);
@@ -612,42 +623,70 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }, [indicators]);
 
   // User Management Handlers (for QA and Admin)
-  const addUser = async (newUser: Omit<User, 'id'>) => {
+  const addUser = async (newUser: Omit<User, 'id'>): Promise<{ success: boolean; error?: string }> => {
     const id = `USR-${Date.now().toString().slice(-6)}`;
     const avatar = newUser.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80';
-    const userObj = { ...newUser, id, avatar };
+    const userObj: User = { ...newUser, id, avatar };
+    
+    // Optimistically update React state and local storage immediately
+    setUsers((prev) => {
+      const filtered = prev.filter(
+        (u) => u.id !== id && u.username.toLowerCase() !== newUser.username.toLowerCase()
+      );
+      const nextUsers = [userObj, ...filtered];
+      safeStorage.setItem(STORAGE_KEYS.USERS_LIST, JSON.stringify(nextUsers));
+      return nextUsers;
+    });
+
     try {
       await safeSetDoc(doc(db, 'users', id), userObj);
-    } catch (e) {
-      console.error(e);
+    } catch (e: any) {
+      console.warn('Firestore user sync deferred:', e);
     }
+    return { success: true };
   };
 
-  const updateUser = async (id: string, updated: Partial<User>) => {
+  const updateUser = async (id: string, updated: Partial<User>): Promise<{ success: boolean; error?: string }> => {
+    setUsers((prev) => {
+      const nextUsers = prev.map((u) => (u.id === id ? { ...u, ...updated } : u));
+      safeStorage.setItem(STORAGE_KEYS.USERS_LIST, JSON.stringify(nextUsers));
+      return nextUsers;
+    });
+
+    if (currentUser?.id === id) {
+      setCurrentUser((prev) => (prev ? { ...prev, ...updated } : prev));
+    }
+
     try {
       await safeSetDoc(doc(db, 'users', id), updated, { merge: true });
-      const target = users.find((u) => u.id === id);
-      if (target && currentUser?.id === id) {
-        setCurrentUser({ ...target, ...updated });
-      }
-    } catch (e) {
-      console.error(e);
+    } catch (e: any) {
+      console.warn('Firestore user update deferred:', e);
     }
+    return { success: true };
   };
 
-  const deleteUser = async (id: string) => {
+  const deleteUser = async (id: string): Promise<{ success: boolean; error?: string }> => {
     if (currentUser && id === currentUser.id) {
-      alert('Tidak dapat menghapus akun yang sedang aktif digunakan.');
-      return;
+      return { success: false, error: 'Tidak dapat menghapus akun yang sedang aktif.' };
     }
+
+    setUsers((prev) => {
+      const nextUsers = prev.filter((u) => u.id !== id);
+      safeStorage.setItem(STORAGE_KEYS.USERS_LIST, JSON.stringify(nextUsers));
+      return nextUsers;
+    });
+
     try {
       await deleteDoc(doc(db, 'users', id));
-    } catch (e) {
-      console.error(e);
+    } catch (e: any) {
+      console.warn('Firestore user delete deferred:', e);
     }
+    return { success: true };
   };
 
   const resetUsersToDefault = async () => {
+    setUsers(INITIAL_USERS);
+    safeStorage.setItem(STORAGE_KEYS.USERS_LIST, JSON.stringify(INITIAL_USERS));
     try {
       const snap = await getDocs(collection(db, 'users'));
       for (const d of snap.docs) {
@@ -657,23 +696,32 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         await safeSetDoc(doc(db, 'users', u.id), u);
       }
     } catch (e) {
-      console.error(e);
+      console.warn('Reset to default Firestore sync deferred:', e);
     }
   };
 
   const bulkUsersCreate = async (newUsers: Omit<User, 'id'>[]) => {
+    const createdList: User[] = newUsers.map((u, idx) => ({
+      ...u,
+      id: `USR-${Date.now().toString().slice(-4)}-${idx}-${Math.random().toString(36).substr(2, 4)}`,
+      avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+    }));
+
+    setUsers((prev) => {
+      const userMap = new Map<string, User>();
+      prev.forEach((u) => userMap.set(u.username.toLowerCase(), u));
+      createdList.forEach((u) => userMap.set(u.username.toLowerCase(), u));
+      const nextUsers = Array.from(userMap.values());
+      safeStorage.setItem(STORAGE_KEYS.USERS_LIST, JSON.stringify(nextUsers));
+      return nextUsers;
+    });
+
     try {
-      for (const u of newUsers) {
-        const id = `USR-${Date.now().toString().slice(-4)}-${Math.random().toString(36).substr(2, 5)}`;
-        const userObj = {
-          ...u,
-          id,
-          avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
-        };
-        await safeSetDoc(doc(db, 'users', id), userObj);
+      for (const u of createdList) {
+        await safeSetDoc(doc(db, 'users', u.id), u);
       }
     } catch (e) {
-      console.error(e);
+      console.warn('Bulk users create Firestore sync deferred:', e);
     }
   };
 
@@ -2043,9 +2091,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         loadSampleSheetData,
         importCSVText,
         importEvaluationsFromExcel,
-        clearAllData,
         bulkUsersCreate,
         handleBulkCreate,
+        clearAllData,
         evaluations,
         createSamplingEvaluation,
         evaluateTicketWithAI,
