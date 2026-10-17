@@ -146,9 +146,23 @@ export const HistorySanggahanView: React.FC = () => {
     return Array.from(set).sort();
   }, [evaluations]);
 
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 20;
+
+  const totalPages = Math.ceil(filteredList.length / itemsPerPage);
+  const paginatedList = useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    return filteredList.slice(startIndex, startIndex + itemsPerPage);
+  }, [filteredList, currentPage]);
+
   const toggleExpand = (id: string) => {
     setExpandedId((prev) => (prev === id ? null : id));
   };
+  
+  // Reset page on filter change
+  React.useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, selectedAgent, selectedMonth, selectedStatus]);
 
   // Export to Excel (.xlsx)
   const handleExportExcel = () => {
@@ -384,7 +398,7 @@ export const HistorySanggahanView: React.FC = () => {
         </div>
       ) : (
         <div className="space-y-4">
-          {filteredList.map((item) => {
+          {paginatedList.map((item) => {
             const isExpanded = expandedId === item.id;
             const hasRebuttal = Boolean(item.sanggahan);
             const scoreChanged = item.nilaiFinal !== item.nilaiAwal;
@@ -598,6 +612,28 @@ export const HistorySanggahanView: React.FC = () => {
               </div>
             );
           })}
+
+          {totalPages > 1 && (
+            <div className="flex items-center justify-center gap-2 pt-2 pb-4">
+              <button
+                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                disabled={currentPage === 1}
+                className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-bold bg-white text-slate-700 disabled:opacity-50 hover:bg-slate-50 transition"
+              >
+                Sebelumnya
+              </button>
+              <span className="text-xs font-medium text-slate-600">
+                Halaman {currentPage} dari {totalPages}
+              </span>
+              <button
+                onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                disabled={currentPage === totalPages}
+                className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-bold bg-white text-slate-700 disabled:opacity-50 hover:bg-slate-50 transition"
+              >
+                Selanjutnya
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

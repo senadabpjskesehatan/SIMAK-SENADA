@@ -208,16 +208,18 @@ export const DashboardView: React.FC = () => {
           >
             <FileSearch className="w-4 h-4" /> Analisis & Rekomendasi
           </button>
-          <button
-            onClick={() => setDashboardSubTab('reset')}
-            className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 transition ${
-              dashboardSubTab === 'reset'
-                ? 'bg-rose-600 text-white shadow-xs'
-                : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-            }`}
-          >
-            <RotateCcw className="w-4 h-4" /> Reset & Hapus Nilai
-          </button>
+          {currentUser?.role === 'admin' && (
+            <button
+              onClick={() => setDashboardSubTab('reset')}
+              className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 transition ${
+                dashboardSubTab === 'reset'
+                  ? 'bg-rose-600 text-white shadow-xs'
+                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+              }`}
+            >
+              <RotateCcw className="w-4 h-4" /> Reset & Hapus Nilai
+            </button>
+          )}
         </div>
         <div className="text-xs text-slate-500 font-medium px-3 hidden sm:block">
           Modul Dashboard Mutu & Analisis
