@@ -57,14 +57,14 @@ export const LoginView: React.FC = () => {
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-extrabold text-xl tracking-tight text-white">
-                  SENADA
+                  SIMAK - SENADA
                 </span>
                 <span className="text-[10px] font-semibold tracking-wider uppercase px-2 py-0.5 rounded bg-teal-500/20 text-teal-300 border border-teal-500/30">
                   BPJS Kesehatan
                 </span>
               </div>
               <p className="text-[11px] text-slate-400">
-                Sistem Penjaminan Mutu & Sampling Jawaban Petugas
+                Sistem Monitoring dan Analisis Kualitas Senada
               </p>
             </div>
           </div>

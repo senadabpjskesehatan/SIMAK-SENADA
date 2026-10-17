@@ -150,9 +150,9 @@ export const Header: React.FC<HeaderProps> = ({ onOpenLoginModal }) => {
       <div className="bg-slate-900 text-slate-300 text-xs px-4 py-2 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-          <span className="font-medium text-slate-200">SENADA BPJS Kesehatan</span>
+          <span className="font-medium text-slate-200">SIMAK - SENADA</span>
           <span className="text-slate-500">·</span>
-          <span>Sistem Penjaminan Mutu Jawaban Petugas Berbasis AI & Regulasi SOP</span>
+          <span>Sistem Monitoring dan Analisis Kualitas Senada</span>
         </div>
 
         <div className="flex items-center gap-3 text-[11px] text-slate-400">
@@ -171,14 +171,14 @@ export const Header: React.FC<HeaderProps> = ({ onOpenLoginModal }) => {
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-extrabold text-xl tracking-tight text-slate-900">
-                  SENADA
+                  SIMAK - SENADA
                 </span>
                 <span className="text-[10px] font-semibold tracking-wider uppercase px-1.5 py-0.5 rounded bg-teal-100 text-teal-800">
                   v2.5 Mutu
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 -mt-0.5">
-                Sampling Jawaban & Penilaian Mutu Teks
+                Sistem Monitoring dan Analisis Kualitas Senada
               </p>
             </div>
           </div>

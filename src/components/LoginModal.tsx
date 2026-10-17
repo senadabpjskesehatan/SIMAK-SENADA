@@ -55,9 +55,9 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
               <ShieldCheck className="w-6 h-6" />
             </div>
             <div>
-              <h2 className="text-base font-bold tracking-tight">Portal Masuk SENADA</h2>
+              <h2 className="text-base font-bold tracking-tight">Portal Masuk SIMAK - SENADA</h2>
               <p className="text-xs text-teal-200">
-                BPJS Kesehatan · Penjaminan Mutu
+                Sistem Monitoring dan Analisis Kualitas Senada
               </p>
             </div>
           </div>
