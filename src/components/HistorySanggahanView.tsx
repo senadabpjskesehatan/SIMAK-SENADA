@@ -29,6 +29,8 @@ export const HistorySanggahanView: React.FC = () => {
   const [selectedStatus, setSelectedStatus] = useState('all');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadStepText, setUploadStepText] = useState('');
   const [uploadMsg, setUploadMsg] = useState<{ success: boolean; text: string } | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -57,8 +59,15 @@ export const HistorySanggahanView: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
     setUploading(true);
+    setUploadProgress(0);
+    setUploadStepText('Mempersiapkan upload berkas Excel...');
     setUploadMsg(null);
-    const res = await importEvaluationsFromExcel(file);
+
+    const res = await importEvaluationsFromExcel(file, (percent, text) => {
+      setUploadProgress(percent);
+      setUploadStepText(text);
+    });
+
     setUploading(false);
     setUploadMsg({ success: res.success, text: res.message });
     if (fileInputRef.current) {
@@ -269,6 +278,24 @@ export const HistorySanggahanView: React.FC = () => {
             </button>
           </div>
         </div>
+
+        {uploading && (
+          <div className="mt-3 p-4 bg-teal-50 border border-teal-200 rounded-xl space-y-2">
+            <div className="flex items-center justify-between text-xs font-bold text-teal-900">
+              <span className="flex items-center gap-2">
+                <FileSpreadsheet className="w-4 h-4 animate-spin text-teal-600" />
+                {uploadStepText || 'Memproses berkas Excel...'}
+              </span>
+              <span>{uploadProgress}%</span>
+            </div>
+            <div className="w-full bg-teal-200 rounded-full h-2 overflow-hidden">
+              <div
+                className="bg-teal-600 h-2 rounded-full transition-all duration-300"
+                style={{ width: `${uploadProgress}%` }}
+              ></div>
+            </div>
+          </div>
+        )}
 
         {uploadMsg && (
           <div className={`mt-3 p-3 rounded-xl text-xs font-medium flex items-center justify-between ${uploadMsg.success ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-rose-50 text-rose-800 border border-rose-200'}`}>

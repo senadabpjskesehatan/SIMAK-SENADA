@@ -1462,13 +1462,33 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         return { success: false, message: 'File Excel kosong atau tidak memiliki baris data.' };
       }
 
+      const activeIndicators = indicators.length > 0 ? indicators : [
+        { id: 'ind-1', nama: 'Salam Pembuka', bobot: 9 },
+        { id: 'ind-2', nama: 'Menyapa Peserta', bobot: 9 },
+        { id: 'ind-3', nama: 'Pemilihan Topik Masalah', bobot: 9 },
+        { id: 'ind-4', nama: 'Anaisis', bobot: 9 },
+        { id: 'ind-5', nama: 'Akurasi Informasi', bobot: 10 },
+        { id: 'ind-6', nama: 'Edukasi Tambahan', bobot: 9 },
+        { id: 'ind-7', nama: 'Kesesuaian Tindak Lanjut', bobot: 9 },
+        { id: 'ind-8', nama: 'Pemilihan Kata Dan Bahasa', bobot: 9 },
+        { id: 'ind-9', nama: 'Kemampuan Presentasi', bobot: 9 },
+        { id: 'ind-10', nama: 'Edukasi Rating', bobot: 9 },
+        { id: 'ind-11', nama: 'Salam Penutup', bobot: 9 },
+      ];
+
       const newEvaluations: SamplingEvaluation[] = [];
       const newTickets: Ticket[] = [];
+      const totalRows = rows.length - 1;
 
       for (let r = 1; r < rows.length; r++) {
         const row = rows[r];
         if (!row || !Array.isArray(row) || row.every((c) => c === '' || c === undefined || c === null)) {
           continue;
+        }
+
+        const pct = Math.min(85, 20 + Math.round(((r - 1) / totalRows) * 60));
+        if (r % 5 === 0 || r === 1) {
+          onProgress?.(pct, `Memproses baris ${r} dari ${totalRows} (Menghitung nilai indikator)...`);
         }
 
         // Helper to parse dd/mm/yyyy or excel date
@@ -1492,7 +1512,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             }
           }
           const str = String(val).trim();
-          // Check dd/mm/yyyy or dd-mm-yyyy
           const matchDmy = str.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
           if (matchDmy) {
             const d = matchDmy[1].padStart(2, '0');
@@ -1522,17 +1541,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const tanggalSampling = parseDmyDate(row[9]);
         const qaName = String(row[10] || currentUser?.name || 'Quality Assurance').trim();
 
-        const scores: IndicatorScore[] = indicators.map((ind, idx) => {
+        const scores: IndicatorScore[] = activeIndicators.map((ind, idx) => {
           const cellVal = row[11 + idx];
           let scoreNum = 100;
-          if (cellVal !== undefined && cellVal !== '') {
+          if (cellVal !== undefined && cellVal !== '' && cellVal !== null) {
             const strVal = String(cellVal).trim().toUpperCase();
             if (strVal === 'N/A' || strVal === 'NA' || strVal === '-') {
-              scoreNum = 100; // N/A default or max weight
+              scoreNum = 100;
             } else {
               const num = Number(cellVal);
               if (!isNaN(num)) {
-                // If value is 0, 1, 2, 3 based on indicator scale
                 if (num === 0) scoreNum = 0;
                 else if (num === 1) scoreNum = 33;
                 else if (num === 2) scoreNum = 67;
@@ -1556,12 +1574,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
         const catatan = String(row[22] || 'Diimpor dari Excel History & Nilai Akhir.').trim();
 
-        const totalBobot = indicators.reduce((acc, i) => acc + (Number(i.bobot) || 0), 0) || 100;
+        const totalBobot = activeIndicators.reduce((acc, i) => acc + (Number(i.bobot) || 0), 0) || 100;
         const weightedSum = scores.reduce((acc, s) => {
-          const ind = indicators.find((i) => i.id === s.indicatorId);
+          const ind = activeIndicators.find((i) => i.id === s.indicatorId);
           return acc + (s.score * (ind?.bobot || 0));
         }, 0);
         const nilaiAwal = Math.round((weightedSum / totalBobot) * 10) / 10;
+        const nilaiFinal = nilaiAwal;
 
         const petugasObj = users.find((u) => u.name.toLowerCase() === namaPetugas.toLowerCase());
         const petugasTeam = petugasObj?.team || 'TIM 1';
