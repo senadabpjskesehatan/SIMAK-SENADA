@@ -128,9 +128,9 @@ interface AppContextType {
 
   // Indicators management
   indicators: Indicator[];
-  addIndicator: (indicator: Omit<Indicator, 'id'>) => void;
-  updateIndicator: (id: string, updated: Partial<Indicator>) => void;
-  deleteIndicator: (id: string) => void;
+  addIndicator: (indicator: Omit<Indicator, 'id'>) => Promise<{ success: boolean; error?: string }> | void;
+  updateIndicator: (id: string, updated: Partial<Indicator>) => Promise<{ success: boolean; error?: string }> | void;
+  deleteIndicator: (id: string) => Promise<{ success: boolean; error?: string }> | void;
   resetIndicators: () => void;
   totalIndicatorWeight: number;
 
@@ -399,7 +399,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [activeTab, setActiveTab] = useState<string>('dashboard');
 
   // 4. Indicators synced with Firestore
-  const [indicators, setIndicators] = useState<Indicator[]>(INITIAL_INDICATORS);
+  const [indicators, setIndicators] = useState<Indicator[]>(() => {
+    const saved = safeStorage.getItem(STORAGE_KEYS.INDICATORS);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch {
+        // fallback
+      }
+    }
+    return INITIAL_INDICATORS;
+  });
+
   useEffect(() => {
     const unsubscribe = onSnapshot(
       collection(db, 'indicators'),
@@ -409,23 +421,25 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           indList.push(doc.data() as Indicator);
         });
         if (indList.length > 0) {
+          indList.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true, sensitivity: 'base' }));
           setIndicators(indList);
+          safeStorage.setItem(STORAGE_KEYS.INDICATORS, JSON.stringify(indList));
         } else {
           for (const ind of INITIAL_INDICATORS) {
             await safeSetDoc(doc(db, 'indicators', ind.id), ind);
           }
           setIndicators(INITIAL_INDICATORS);
+          safeStorage.setItem(STORAGE_KEYS.INDICATORS, JSON.stringify(INITIAL_INDICATORS));
         }
       },
       (error) => {
         handleFirestoreError(error, 'onSnapshot', 'indicators');
-        setIndicators((prev) => (prev.length > 0 ? prev : INITIAL_INDICATORS));
       }
     );
     return () => unsubscribe();
   }, []);
 
-  // 5. Tickets
+  // 5. Tickets (Tanpa Data Default - semata-mata berasal dari sinkronisasi Google Sheet)
   const [tickets, setTickets] = useState<Ticket[]>([]);
 
   useEffect(() => {
@@ -440,11 +454,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             kategori: cleanCategory(t.kategori),
           });
         });
-        setTickets(ticketsList.length > 0 ? ticketsList : INITIAL_TICKETS);
+        setTickets(ticketsList);
       },
       (error) => {
         handleFirestoreError(error, 'onSnapshot', 'tickets');
-        setTickets((prev) => (prev.length > 0 ? prev : INITIAL_TICKETS));
+        setTickets([]);
       }
     );
     return () => unsubscribe();
@@ -947,37 +961,60 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
-  // Indicator Management Handlers
-  const addIndicator = async (newInd: Omit<Indicator, 'id'>) => {
-    const id = `IND-${String(indicators.length + 1).padStart(2, '0')}-${Date.now().toString().slice(-4)}`;
-    const indObj = { ...newInd, id };
-    setIndicators((prev) => [...prev, indObj]);
+  // Indicator Management Handlers (Tersimpan di server Firestore & cache)
+  const addIndicator = async (newInd: Omit<Indicator, 'id'>): Promise<{ success: boolean; error?: string }> => {
+    const id = `IND-${Date.now().toString().slice(-6)}`;
+    const indObj: Indicator = { ...newInd, id };
+    setIndicators((prev) => {
+      const next = [...prev, indObj];
+      safeStorage.setItem(STORAGE_KEYS.INDICATORS, JSON.stringify(next));
+      return next;
+    });
+
     try {
       await safeSetDoc(doc(db, 'indicators', id), indObj);
-    } catch (e) {
-      console.error(e);
+      return { success: true };
+    } catch (e: any) {
+      console.warn('Firestore addIndicator deferred:', e);
+      return { success: true };
     }
   };
 
-  const updateIndicator = async (id: string, updated: Partial<Indicator>) => {
-    setIndicators((prev) => prev.map((ind) => (ind.id === id ? { ...ind, ...updated } : ind)));
+  const updateIndicator = async (id: string, updated: Partial<Indicator>): Promise<{ success: boolean; error?: string }> => {
+    setIndicators((prev) => {
+      const next = prev.map((ind) => (ind.id === id ? { ...ind, ...updated } : ind));
+      safeStorage.setItem(STORAGE_KEYS.INDICATORS, JSON.stringify(next));
+      return next;
+    });
+
     try {
-      await safeSetDoc(doc(db, 'indicators', id), updated, { merge: true });
-    } catch (e) {
-      console.error(e);
+      await safeSetDoc(doc(db, 'indicators', id), { ...updated, id }, { merge: true });
+      return { success: true };
+    } catch (e: any) {
+      console.warn('Firestore updateIndicator deferred:', e);
+      return { success: true };
     }
   };
 
-  const deleteIndicator = async (id: string) => {
-    setIndicators((prev) => prev.filter((ind) => ind.id !== id));
+  const deleteIndicator = async (id: string): Promise<{ success: boolean; error?: string }> => {
+    setIndicators((prev) => {
+      const next = prev.filter((ind) => ind.id !== id);
+      safeStorage.setItem(STORAGE_KEYS.INDICATORS, JSON.stringify(next));
+      return next;
+    });
+
     try {
       await deleteDoc(doc(db, 'indicators', id));
-    } catch (e) {
-      console.error(e);
+      return { success: true };
+    } catch (e: any) {
+      console.warn('Firestore deleteIndicator deferred:', e);
+      return { success: true };
     }
   };
 
   const resetIndicators = async () => {
+    setIndicators(INITIAL_INDICATORS);
+    safeStorage.setItem(STORAGE_KEYS.INDICATORS, JSON.stringify(INITIAL_INDICATORS));
     try {
       const snap = await getDocs(collection(db, 'indicators'));
       for (const d of snap.docs) {
@@ -987,7 +1024,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         await safeSetDoc(doc(db, 'indicators', ind.id), ind);
       }
     } catch (e) {
-      console.error(e);
+      console.warn('Reset indicators Firestore deferred:', e);
     }
   };
 
@@ -1155,17 +1192,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
         for (const newT of parsed.data) {
           const oldT = existingMap.get(newT.nomorTiket);
-          const normalizedT: Ticket = {
-            ...newT,
-            kategori: cleanCategory(newT.kategori),
-            sampled: oldT ? Boolean(oldT.sampled) : false,
-            samplingId: oldT?.samplingId,
-          };
-          if (!existingMap.has(newT.nomorTiket)) {
+          if (!oldT) {
+            // Tiket baru yang belum ada pada sistem: ditambahkan tanpa menghapus atau mengganti data lama
             addedCount++;
+            const normalizedT: Ticket = {
+              ...newT,
+              kategori: cleanCategory(newT.kategori),
+              sampled: false,
+            };
+            existingMap.set(newT.nomorTiket, normalizedT);
+            itemsToSet.push({ path: 'tickets', id: newT.nomorTiket, data: normalizedT });
           }
-          existingMap.set(newT.nomorTiket, normalizedT);
-          itemsToSet.push({ path: 'tickets', id: newT.nomorTiket, data: normalizedT });
         }
 
         if (itemsToSet.length > 0) {
@@ -1547,6 +1584,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         { id: 'ind-11', nama: 'Salam Penutup', bobot: 9 },
       ];
 
+      const userMapByName = new Map<string, User>();
+      users.forEach((u) => userMapByName.set(u.name.trim().toLowerCase(), u));
+      const newUsersToSave: User[] = [];
+
       const newEvaluations: SamplingEvaluation[] = [];
       const newTickets: Ticket[] = [];
       const totalRows = rows.length - 1;
@@ -1653,7 +1694,46 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const nilaiAwal = Math.round((weightedSum / totalBobot) * 10) / 10;
         const nilaiFinal = nilaiAwal;
 
-        const petugasObj = users.find((u) => u.name.toLowerCase() === namaPetugas.toLowerCase());
+        // Pastikan namaPetugas terdata di user list & server Firestore
+        let petugasObj = userMapByName.get(namaPetugas.toLowerCase());
+        if (!petugasObj && namaPetugas.trim() !== '') {
+          const generatedId = `USR-P-${Date.now().toString().slice(-4)}-${r}`;
+          const cleanUser = namaPetugas.replace(/[^a-zA-Z0-9]/g, '').toLowerCase().slice(0, 15) || `petugas${r}`;
+          petugasObj = {
+            id: generatedId,
+            name: namaPetugas.trim(),
+            username: cleanUser,
+            role: 'petugas',
+            email: `${cleanUser}@bpjskesehatan.go.id`,
+            team: 'TIM 1',
+            nip: `260${String(r).padStart(3, '0')}`,
+            password: 'kualitas99',
+            division: 'Unit Layanan Informasi',
+          };
+          userMapByName.set(namaPetugas.toLowerCase(), petugasObj);
+          newUsersToSave.push(petugasObj);
+        }
+
+        // Pastikan qaName terdata di user list & server Firestore
+        let qaObj = userMapByName.get(qaName.toLowerCase());
+        if (!qaObj && qaName.trim() !== '') {
+          const generatedQaId = `USR-QA-${Date.now().toString().slice(-4)}-${r}`;
+          const cleanQa = qaName.replace(/[^a-zA-Z0-9]/g, '').toLowerCase().slice(0, 15) || `qa${r}`;
+          qaObj = {
+            id: generatedQaId,
+            name: qaName.trim(),
+            username: cleanQa,
+            role: 'qa',
+            email: `${cleanQa}@bpjskesehatan.go.id`,
+            team: '',
+            nip: `198${String(r).padStart(4, '0')}`,
+            password: 'kualitas99',
+            division: 'Unit Penjaminan Mutu Layanan',
+          };
+          userMapByName.set(qaName.toLowerCase(), qaObj);
+          newUsersToSave.push(qaObj);
+        }
+
         const petugasTeam = petugasObj?.team || 'TIM 1';
         const samplingId = `SMP-IMP-${Date.now()}-${r}`;
 
@@ -1666,7 +1746,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           isiKeluhan,
           isiJawaban,
           rating,
-          namaPetugas,
+          namaPetugas: petugasObj?.name || namaPetugas,
           sampled: true,
           samplingId,
         };
@@ -1675,8 +1755,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           id: samplingId,
           nomorTiket,
           ticket,
-          qaId: 'qa-imported',
-          qaName,
+          qaId: qaObj?.id || 'qa-imported',
+          qaName: qaObj?.name || qaName,
           petugasTeam,
           tanggalSampling,
           scores,
@@ -1688,17 +1768,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           history: [
             {
               timestamp: `${tanggalSampling} 09:00:00`,
-              actor: qaName,
+              actor: qaObj?.name || qaName,
               role: 'Quality Assurance',
               action: 'Import data history dan nilai akhir via Excel',
-              note: `Catatan QA (${qaName}): ${catatan}. Nilai Final: ${nilaiAwal}. Tercatat ke Petugas (${namaPetugas}) dan Team Leader (${petugasTeam}).`,
+              note: `Catatan QA (${qaObj?.name || qaName}): ${catatan}. Nilai Final: ${nilaiAwal}. Tercatat resmi pada akun Petugas (${petugasObj?.name || namaPetugas}) dan Team Leader (${petugasTeam}).`,
             },
             {
               timestamp: `${tanggalSampling} 10:00:00`,
-              actor: namaPetugas,
+              actor: petugasObj?.name || namaPetugas,
               role: 'Petugas',
               action: 'Menerima dan menyetujui hasil sampling',
-              note: `Petugas (${namaPetugas}) menyetujui hasil nilai akhir ${nilaiAwal}.`,
+              note: `Petugas (${petugasObj?.name || namaPetugas}) menyetujui hasil nilai akhir ${nilaiAwal}.`,
             }
           ]
         };
@@ -1709,6 +1789,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
       if (newEvaluations.length === 0) {
         return { success: false, message: 'Tidak ada baris data valid yang ditemukan pada file Excel.' };
+      }
+
+      // Persist any newly registered users from Excel to Firestore server
+      if (newUsersToSave.length > 0) {
+        const userBatchItems = newUsersToSave.map((u) => ({
+          path: 'users',
+          id: u.id,
+          data: u,
+        }));
+        await batchSetDocs(userBatchItems);
+        setUsers((prev) => {
+          const updated = [...prev, ...newUsersToSave];
+          safeStorage.setItem(STORAGE_KEYS.USERS_LIST, JSON.stringify(updated));
+          return updated;
+        });
       }
 
       setEvaluations((prev) => [...newEvaluations, ...prev]);

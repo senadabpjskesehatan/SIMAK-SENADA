@@ -169,7 +169,7 @@ export const DashboardAnalysisView: React.FC = () => {
       }
       stats[agent].totalScore += e.nilaiFinal;
       stats[agent].count += 1;
-      if (e.nilaiFinal < 80) {
+      if (e.nilaiFinal < 90) {
         stats[agent].lowScoresCount += 1;
       }
     });
@@ -225,7 +225,7 @@ export const DashboardAnalysisView: React.FC = () => {
                 Analisis & Rekomendasi Mutu Layanan
               </h1>
               <p className="text-xs text-slate-500">
-                Analisis mendalam berdasarkan petugas, topik masalah, dan indikator penilaian mutu yang memerlukan perbaikan (di bawah standar 80)
+                Analisis mendalam berdasarkan petugas, topik masalah, dan indikator penilaian mutu yang memerlukan perbaikan (di bawah standar kelulusan 90)
               </p>
             </div>
           </div>

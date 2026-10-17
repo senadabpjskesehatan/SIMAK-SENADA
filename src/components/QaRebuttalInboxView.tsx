@@ -290,9 +290,20 @@ export const QaRebuttalInboxView: React.FC = () => {
                       <span className="text-[10px] uppercase font-semibold text-slate-400 block">
                         Nilai Awal QA
                       </span>
-                      <span className="text-lg font-extrabold text-slate-800">
-                        {item.nilaiAwal}
-                      </span>
+                      <div className="flex items-center gap-1.5 justify-end mt-0.5">
+                        <span className="text-lg font-extrabold text-slate-800">
+                          {item.nilaiAwal}
+                        </span>
+                        <span
+                          className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded border ${
+                            item.nilaiAwal >= 90
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              : 'bg-rose-50 text-rose-700 border-rose-200'
+                          }`}
+                        >
+                          {item.nilaiAwal >= 90 ? 'Lulus' : 'Tidak Lulus'}
+                        </span>
+                      </div>
                     </div>
                     {item.sanggahan?.usulanNilai && (
                       <div className="text-right pl-3 border-l border-slate-200">

@@ -63,12 +63,15 @@ export const DashboardView: React.FC = () => {
     return Math.round((sum / filteredEvaluations.length) * 10) / 10;
   }, [filteredEvaluations]);
 
-  // Score Predicate
-  const getScorePredicate = (score: number) => {
-    if (score >= 90) return { label: 'Sangat Baik (A)', color: 'text-emerald-700 bg-emerald-50 border-emerald-200' };
-    if (score >= 80) return { label: 'Baik (B)', color: 'text-teal-700 bg-teal-50 border-teal-200' };
-    if (score >= 70) return { label: 'Cukup (C)', color: 'text-amber-700 bg-amber-50 border-amber-200' };
-    return { label: 'Perlu Perbaikan (D)', color: 'text-rose-700 bg-rose-50 border-rose-200' };
+  // Score Predicate (Ketentuan: Di atas 90 = Lulus [Warna Hijau], Di bawah 90 = Tidak Lulus [Warna Merah])
+  const getScorePredicate = (score: number, totalCount?: number) => {
+    if (totalCount !== undefined && totalCount === 0) {
+      return { label: 'Belum Ada Penilaian', color: 'text-slate-600 bg-slate-50 border-slate-200' };
+    }
+    if (score >= 90) {
+      return { label: 'Lulus', color: 'text-emerald-700 bg-emerald-50 border-emerald-200' };
+    }
+    return { label: 'Tidak Lulus', color: 'text-rose-700 bg-rose-50 border-rose-200' };
   };
 
   // Rebuttal / Dispute Rate
@@ -181,7 +184,7 @@ export const DashboardView: React.FC = () => {
     };
   }, [filteredTickets]);
 
-  const predicate = getScorePredicate(averageQualityScore);
+  const predicate = getScorePredicate(averageQualityScore, sampledTickets);
 
   return (
     <div className="space-y-6">
@@ -225,6 +228,31 @@ export const DashboardView: React.FC = () => {
           Modul Dashboard Mutu & Analisis
         </div>
       </div>
+
+      {/* No tickets synced notice */}
+      {tickets.length === 0 && (
+        <div className="bg-gradient-to-r from-teal-50 to-emerald-50 border border-teal-200 rounded-xl p-5 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-2xs">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-teal-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+              <Sparkles className="w-5 h-5 text-amber-300" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-slate-900">Belum Ada Data Tiket yang Tersinkron</h3>
+              <p className="text-xs text-slate-600">
+                Aplikasi beroperasi secara murni tanpa data default (mock). Silakan lakukan sinkronisasi data dari tautan Google Sheet untuk mulai memantau dan menganalisis kualitas pelayanan.
+              </p>
+            </div>
+          </div>
+          {role === 'qa' && (
+            <button
+              onClick={() => setActiveTab('google-sheet')}
+              className="px-4 py-2 bg-teal-700 hover:bg-teal-800 text-white rounded-lg text-xs font-bold shadow-xs transition shrink-0"
+            >
+              Sinkronkan Google Sheet Sekarang
+            </button>
+          )}
+        </div>
+      )}
 
       {dashboardSubTab === 'analisis' ? (
         <DashboardAnalysisView />
@@ -506,8 +534,8 @@ export const DashboardView: React.FC = () => {
                           </div>
                         </td>
                         <td className="py-3 px-3 text-right">
-                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${agentPred.color}`}>
-                            {agentPred.label.split(' ')[0]}
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${agentPred.color}`}>
+                            {agentPred.label}
                           </span>
                         </td>
                       </tr>

@@ -408,9 +408,20 @@ export const PetugasInboxView: React.FC = () => {
                       <span className="text-[10px] uppercase font-semibold text-slate-400 block">
                         {isCompleted ? 'Nilai Akhir Final' : 'Nilai Awal QA'}
                       </span>
-                      <span className={`text-lg font-extrabold ${isCompleted ? 'text-emerald-700' : 'text-blue-700'}`}>
-                        {item.nilaiFinal} <span className="text-xs font-normal text-slate-400">/ 100</span>
-                      </span>
+                      <div className="flex items-center gap-1.5 justify-end mt-0.5">
+                        <span className={`text-lg font-extrabold ${isCompleted ? 'text-emerald-700' : 'text-blue-700'}`}>
+                          {item.nilaiFinal} <span className="text-xs font-normal text-slate-400">/ 100</span>
+                        </span>
+                        <span
+                          className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded border ${
+                            item.nilaiFinal >= 90
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              : 'bg-rose-50 text-rose-700 border-rose-200'
+                          }`}
+                        >
+                          {item.nilaiFinal >= 90 ? 'Lulus' : 'Tidak Lulus'}
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </div>

@@ -466,9 +466,20 @@ export const HistorySanggahanView: React.FC = () => {
                         <span className="text-[10px] uppercase font-bold text-teal-800 block">
                           Nilai Akhir Final
                         </span>
-                        <span className={`text-xl font-extrabold ${scoreChanged ? 'text-teal-700' : 'text-slate-900'}`}>
-                          {item.nilaiFinal}
-                        </span>
+                        <div className="flex items-center justify-center gap-1.5 mt-0.5">
+                          <span className={`text-xl font-extrabold ${scoreChanged ? 'text-teal-700' : 'text-slate-900'}`}>
+                            {item.nilaiFinal}
+                          </span>
+                          <span
+                            className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded border ${
+                              item.nilaiFinal >= 90
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                : 'bg-rose-50 text-rose-700 border-rose-200'
+                            }`}
+                          >
+                            {item.nilaiFinal >= 90 ? 'Lulus' : 'Tidak Lulus'}
+                          </span>
+                        </div>
                       </div>
                     </div>
 
