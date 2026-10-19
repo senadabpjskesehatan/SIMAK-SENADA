@@ -14,25 +14,40 @@
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <script>
       // Suppress dev server iframe WebSocket reconnection noise
-      window.addEventListener('error', function(e) {
-        if (
-          e?.message?.includes('WebSocket') ||
-          e?.filename?.includes('@vite/client') ||
-          (typeof e?.error?.stack === 'string' && e.error.stack.includes('@vite/client'))
-        ) {
-          e.preventDefault();
-          e.stopImmediatePropagation();
+      (function() {
+        function shouldSuppress(msg, stack, file) {
+          var s = ((msg || '') + ' ' + (stack || '') + ' ' + (file || '')).toLowerCase();
+          return (
+            s.indexOf('websocket') !== -1 ||
+            s.indexOf('@vite/client') !== -1 ||
+            s.indexOf('createwebsocketmodulerunnertransport') !== -1 ||
+            s.indexOf('ws://') !== -1 ||
+            s.indexOf('wss://') !== -1
+          );
         }
-      });
-      window.addEventListener('unhandledrejection', function(e) {
-        if (
-          e?.reason?.message?.includes('WebSocket') ||
-          (typeof e?.reason?.stack === 'string' && e.reason.stack.includes('@vite/client'))
-        ) {
-          e.preventDefault();
-          e.stopImmediatePropagation();
-        }
-      });
+        window.addEventListener('error', function(e) {
+          var msg = e && e.message ? String(e.message) : '';
+          var file = e && e.filename ? String(e.filename) : '';
+          var stack = e && e.error && e.error.stack ? String(e.error.stack) : '';
+          if (shouldSuppress(msg, stack, file)) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+            return true;
+          }
+        }, true);
+        window.addEventListener('unhandledrejection', function(e) {
+          var reason = e ? e.reason : null;
+          var msg = reason && reason.message ? String(reason.message) : String(reason || '');
+          var stack = reason && reason.stack ? String(reason.stack) : '';
+          if (shouldSuppress(msg, stack, '')) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+            return true;
+          }
+        }, true);
+      })();
     </script>
   </head>
   <body class="bg-slate-50 text-slate-900 font-sans antialiased selection:bg-teal-500 selection:text-white">

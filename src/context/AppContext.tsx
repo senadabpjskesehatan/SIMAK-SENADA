@@ -130,6 +130,8 @@ interface AppContextType {
   indicators: Indicator[];
   addIndicator: (indicator: Omit<Indicator, 'id'>) => Promise<{ success: boolean; error?: string }> | void;
   updateIndicator: (id: string, updated: Partial<Indicator>) => Promise<{ success: boolean; error?: string }> | void;
+  updateMultipleIndicators: (updates: { id: string; bobot?: number; nama?: string; deskripsi?: string; nomorSOP?: number }[]) => Promise<{ success: boolean; error?: string }>;
+  applyStandardSopWeights: () => Promise<{ success: boolean; error?: string }>;
   deleteIndicator: (id: string) => Promise<{ success: boolean; error?: string }> | void;
   resetIndicators: () => void;
   totalIndicatorWeight: number;
@@ -421,9 +423,43 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           indList.push(doc.data() as Indicator);
         });
         if (indList.length > 0) {
-          indList.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true, sensitivity: 'base' }));
-          setIndicators(indList);
-          safeStorage.setItem(STORAGE_KEYS.INDICATORS, JSON.stringify(indList));
+          indList.sort((a, b) => {
+            const noA = a.nomorSOP ?? 999;
+            const noB = b.nomorSOP ?? 999;
+            if (noA !== noB) return noA - noB;
+            return a.id.localeCompare(b.id, undefined, { numeric: true, sensitivity: 'base' });
+          });
+
+          // Periksa apakah indikator standar masih memakai nomor urut atau bobot lama (misal 9% atau 10%)
+          const needsCalibration = indList.some((ind) => {
+            const def = INITIAL_INDICATORS.find(
+              (d) => d.id === ind.id || d.nama.toLowerCase() === ind.nama.toLowerCase()
+            );
+            if (!def) return false;
+            return ind.nomorSOP === undefined || (def.bobot !== ind.bobot && (ind.bobot === 9 || (ind.id === 'ind-5' && ind.bobot === 10)));
+          });
+
+          if (needsCalibration) {
+            const updatedList = indList.map((ind) => {
+              const def = INITIAL_INDICATORS.find(
+                (d) => d.id === ind.id || d.nama.toLowerCase() === ind.nama.toLowerCase()
+              );
+              if (def) {
+                const newBobot = (ind.bobot === 9 || (ind.id === 'ind-5' && ind.bobot === 10)) ? def.bobot : ind.bobot;
+                return { ...ind, nomorSOP: def.nomorSOP, bobot: newBobot };
+              }
+              return ind;
+            });
+            setIndicators(updatedList);
+            safeStorage.setItem(STORAGE_KEYS.INDICATORS, JSON.stringify(updatedList));
+            // Sinkronkan pembaruan bobot resmi ke server Firestore
+            for (const ind of updatedList) {
+              await safeSetDoc(doc(db, 'indicators', ind.id), { bobot: ind.bobot, nomorSOP: ind.nomorSOP }, { merge: true });
+            }
+          } else {
+            setIndicators(indList);
+            safeStorage.setItem(STORAGE_KEYS.INDICATORS, JSON.stringify(indList));
+          }
         } else {
           for (const ind of INITIAL_INDICATORS) {
             await safeSetDoc(doc(db, 'indicators', ind.id), ind);
@@ -996,6 +1032,86 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
+  const updateMultipleIndicators = async (
+    updates: { id: string; bobot?: number; nama?: string; deskripsi?: string; nomorSOP?: number }[]
+  ): Promise<{ success: boolean; error?: string }> => {
+    const updateMap = new Map(updates.map((u) => [u.id, u]));
+    setIndicators((prev) => {
+      const next = prev.map((ind) => {
+        const u = updateMap.get(ind.id);
+        return u ? { ...ind, ...u } : ind;
+      });
+      safeStorage.setItem(STORAGE_KEYS.INDICATORS, JSON.stringify(next));
+      return next;
+    });
+
+    try {
+      for (const u of updates) {
+        await safeSetDoc(doc(db, 'indicators', u.id), u, { merge: true });
+      }
+      return { success: true };
+    } catch (e: any) {
+      console.warn('Firestore updateMultipleIndicators deferred:', e);
+      return { success: true };
+    }
+  };
+
+  const applyStandardSopWeights = async (): Promise<{ success: boolean; error?: string }> => {
+    // Standar Resmi SOP BPJS Kesehatan:
+    // 1. Salam Pembuka 5%
+    // 2. Menyapa Peserta 5%
+    // 14. Pemilihan Topik Masalah 10%
+    // 15. Analisis 15%
+    // 16. Akurasi Informasi 20%
+    // 17. Edukasi Tambahan 5%
+    // 18. Kesesuaian Tindak Lanjut 10%
+    // 19. Pemilihan Kata Dan Bahasa 10%
+    // 20. Kemampuan Presentasi 10%
+    // 21. Edukasi Rating 5%
+    // 22. Salam Penutup 5%
+    const standardMap: Record<string, { nomorSOP: number; bobot: number }> = {
+      'salam pembuka': { nomorSOP: 1, bobot: 5 },
+      'menyapa peserta': { nomorSOP: 2, bobot: 5 },
+      'pemilihan topik masalah': { nomorSOP: 14, bobot: 10 },
+      'analisis': { nomorSOP: 15, bobot: 15 },
+      'anaisis': { nomorSOP: 15, bobot: 15 },
+      'akurasi informasi': { nomorSOP: 16, bobot: 20 },
+      'edukasi tambahan': { nomorSOP: 17, bobot: 5 },
+      'kesesuaian tindak lanjut': { nomorSOP: 18, bobot: 10 },
+      'pemilihan kata dan bahasa': { nomorSOP: 19, bobot: 10 },
+      'kemampuan presentasi': { nomorSOP: 20, bobot: 10 },
+      'edukasi rating': { nomorSOP: 21, bobot: 5 },
+      'salam penutup': { nomorSOP: 22, bobot: 5 },
+    };
+
+    const updated = indicators.map((ind, idx) => {
+      const match = standardMap[ind.nama.trim().toLowerCase()] ||
+                    INITIAL_INDICATORS.find((d) => d.id === ind.id) ||
+                    INITIAL_INDICATORS[idx];
+      if (match) {
+        return {
+          ...ind,
+          nomorSOP: match.nomorSOP,
+          bobot: match.bobot,
+        };
+      }
+      return ind;
+    });
+
+    setIndicators(updated);
+    safeStorage.setItem(STORAGE_KEYS.INDICATORS, JSON.stringify(updated));
+
+    try {
+      for (const ind of updated) {
+        await safeSetDoc(doc(db, 'indicators', ind.id), { bobot: ind.bobot, nomorSOP: ind.nomorSOP }, { merge: true });
+      }
+      return { success: true };
+    } catch (e: any) {
+      console.warn('applyStandardSopWeights deferred:', e);
+      return { success: true };
+    }
+  };
+
   const deleteIndicator = async (id: string): Promise<{ success: boolean; error?: string }> => {
     setIndicators((prev) => {
       const next = prev.filter((ind) => ind.id !== id);
@@ -1017,8 +1133,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     safeStorage.setItem(STORAGE_KEYS.INDICATORS, JSON.stringify(INITIAL_INDICATORS));
     try {
       const snap = await getDocs(collection(db, 'indicators'));
+      const initialIds = new Set(INITIAL_INDICATORS.map((i) => i.id));
       for (const d of snap.docs) {
-        await deleteDoc(doc(db, 'indicators', d.id));
+        if (!initialIds.has(d.id)) {
+          await deleteDoc(doc(db, 'indicators', d.id));
+        }
       }
       for (const ind of INITIAL_INDICATORS) {
         await safeSetDoc(doc(db, 'indicators', ind.id), ind);
@@ -1570,19 +1689,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         return { success: false, message: 'File Excel kosong atau tidak memiliki baris data.' };
       }
 
-      const activeIndicators = indicators.length > 0 ? indicators : [
-        { id: 'ind-1', nama: 'Salam Pembuka', bobot: 9 },
-        { id: 'ind-2', nama: 'Menyapa Peserta', bobot: 9 },
-        { id: 'ind-3', nama: 'Pemilihan Topik Masalah', bobot: 9 },
-        { id: 'ind-4', nama: 'Anaisis', bobot: 9 },
-        { id: 'ind-5', nama: 'Akurasi Informasi', bobot: 10 },
-        { id: 'ind-6', nama: 'Edukasi Tambahan', bobot: 9 },
-        { id: 'ind-7', nama: 'Kesesuaian Tindak Lanjut', bobot: 9 },
-        { id: 'ind-8', nama: 'Pemilihan Kata Dan Bahasa', bobot: 9 },
-        { id: 'ind-9', nama: 'Kemampuan Presentasi', bobot: 9 },
-        { id: 'ind-10', nama: 'Edukasi Rating', bobot: 9 },
-        { id: 'ind-11', nama: 'Salam Penutup', bobot: 9 },
-      ];
+      const activeIndicators = indicators.length > 0 ? indicators : INITIAL_INDICATORS;
 
       const userMapByName = new Map<string, User>();
       users.forEach((u) => userMapByName.set(u.name.trim().toLowerCase(), u));
@@ -2176,6 +2283,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         indicators,
         addIndicator,
         updateIndicator,
+        updateMultipleIndicators,
+        applyStandardSopWeights,
         deleteIndicator,
         resetIndicators,
         totalIndicatorWeight,

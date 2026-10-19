@@ -111,17 +111,17 @@ export const DEFAULT_NILAI_OPTIONS: import('../types').IndicatorNilaiOption[] = 
 ];
 
 export const INITIAL_INDICATORS: Indicator[] = [
-  { id: 'ind-1', nama: 'Salam Pembuka', bobot: 9, deskripsi: 'Petugas menyapa dengan sopan dan ramah di awal percakapan.', skalaMin: 0, skalaMax: 100, pilihanNilai: DEFAULT_NILAI_OPTIONS },
-  { id: 'ind-2', nama: 'Menyapa Peserta', bobot: 9, deskripsi: 'Petugas menyebutkan nama peserta jika tersedia.', skalaMin: 0, skalaMax: 100, pilihanNilai: DEFAULT_NILAI_OPTIONS },
-  { id: 'ind-3', nama: 'Pemilihan Topik Masalah', bobot: 9, deskripsi: 'Petugas mengidentifikasi dan mengonfirmasi topik masalah dengan benar.', skalaMin: 0, skalaMax: 100, pilihanNilai: DEFAULT_NILAI_OPTIONS },
-  { id: 'ind-4', nama: 'Analisis', bobot: 9, deskripsi: 'Petugas melakukan analisis masalah dengan tepat.', skalaMin: 0, skalaMax: 100, pilihanNilai: DEFAULT_NILAI_OPTIONS },
-  { id: 'ind-5', nama: 'Akurasi Informasi', bobot: 10, deskripsi: 'Petugas memberikan informasi yang akurat sesuai kebijakan.', skalaMin: 0, skalaMax: 100, pilihanNilai: DEFAULT_NILAI_OPTIONS },
-  { id: 'ind-6', nama: 'Edukasi Tambahan', bobot: 9, deskripsi: 'Petugas memberikan edukasi tambahan yang relevan.', skalaMin: 0, skalaMax: 100, pilihanNilai: DEFAULT_NILAI_OPTIONS },
-  { id: 'ind-7', nama: 'Kesesuaian Tindak Lanjut', bobot: 9, deskripsi: 'Solusi yang diberikan sesuai dengan prosedur tindak lanjut.', skalaMin: 0, skalaMax: 100, pilihanNilai: DEFAULT_NILAI_OPTIONS },
-  { id: 'ind-8', nama: 'Pemilihan Kata Dan Bahasa', bobot: 9, deskripsi: 'Petugas menggunakan bahasa yang baik, benar, dan sopan.', skalaMin: 0, skalaMax: 100, pilihanNilai: DEFAULT_NILAI_OPTIONS },
-  { id: 'ind-9', nama: 'Kemampuan Presentasi', bobot: 9, deskripsi: 'Petugas menyampaikan penjelasan dengan jelas dan mudah dimengerti.', skalaMin: 0, skalaMax: 100, pilihanNilai: DEFAULT_NILAI_OPTIONS },
-  { id: 'ind-10', nama: 'Edukasi Rating', bobot: 9, deskripsi: 'Petugas memberikan edukasi mengenai sistem penilaian/rating.', skalaMin: 0, skalaMax: 100, pilihanNilai: DEFAULT_NILAI_OPTIONS },
-  { id: 'ind-11', nama: 'Salam Penutup', bobot: 9, deskripsi: 'Petugas menutup percakapan dengan sopan dan profesional.', skalaMin: 0, skalaMax: 100, pilihanNilai: DEFAULT_NILAI_OPTIONS },
+  { id: 'ind-1', nomorSOP: 1, nama: 'Salam Pembuka', bobot: 5, deskripsi: 'Petugas menyapa dengan sopan dan ramah di awal percakapan sesuai standar SOP.', skalaMin: 0, skalaMax: 100, pilihanNilai: DEFAULT_NILAI_OPTIONS },
+  { id: 'ind-2', nomorSOP: 2, nama: 'Menyapa Peserta', bobot: 5, deskripsi: 'Petugas menyebutkan nama peserta jika tersedia dengan santun.', skalaMin: 0, skalaMax: 100, pilihanNilai: DEFAULT_NILAI_OPTIONS },
+  { id: 'ind-3', nomorSOP: 14, nama: 'Pemilihan Topik Masalah', bobot: 10, deskripsi: 'Petugas mengidentifikasi dan mengonfirmasi topik masalah dengan tepat sesuai keluhan.', skalaMin: 0, skalaMax: 100, pilihanNilai: DEFAULT_NILAI_OPTIONS },
+  { id: 'ind-4', nomorSOP: 15, nama: 'Analisis', bobot: 15, deskripsi: 'Petugas melakukan analisis masalah dan validasi kepesertaan/faskes dengan komprehensif.', skalaMin: 0, skalaMax: 100, pilihanNilai: DEFAULT_NILAI_OPTIONS },
+  { id: 'ind-5', nomorSOP: 16, nama: 'Akurasi Informasi', bobot: 20, deskripsi: 'Petugas memberikan informasi yang akurat, tepat, dan valid sesuai regulasi BPJS Kesehatan.', skalaMin: 0, skalaMax: 100, pilihanNilai: DEFAULT_NILAI_OPTIONS },
+  { id: 'ind-6', nomorSOP: 17, nama: 'Edukasi Tambahan', bobot: 5, deskripsi: 'Petugas memberikan edukasi tambahan yang relevan (seperti Mobile JKN, CHIKA, dsb).', skalaMin: 0, skalaMax: 100, pilihanNilai: DEFAULT_NILAI_OPTIONS },
+  { id: 'ind-7', nomorSOP: 18, nama: 'Kesesuaian Tindak Lanjut', bobot: 10, deskripsi: 'Solusi atau eskalasi yang diberikan sesuai dengan prosedur tindak lanjut penanganan pengaduan.', skalaMin: 0, skalaMax: 100, pilihanNilai: DEFAULT_NILAI_OPTIONS },
+  { id: 'ind-8', nomorSOP: 19, nama: 'Pemilihan Kata Dan Bahasa', bobot: 10, deskripsi: 'Petugas menggunakan bahasa Indonesia yang baik, benar, formal, dan tidak ambigu.', skalaMin: 0, skalaMax: 100, pilihanNilai: DEFAULT_NILAI_OPTIONS },
+  { id: 'ind-9', nomorSOP: 20, nama: 'Kemampuan Presentasi', bobot: 10, deskripsi: 'Petugas menyampaikan penjelasan secara runtut, jelas, persuasif, dan mudah dipahami.', skalaMin: 0, skalaMax: 100, pilihanNilai: DEFAULT_NILAI_OPTIONS },
+  { id: 'ind-10', nomorSOP: 21, nama: 'Edukasi Rating', bobot: 5, deskripsi: 'Petugas mengajak peserta untuk memberikan umpan balik / rating terhadap layanan dengan santun.', skalaMin: 0, skalaMax: 100, pilihanNilai: DEFAULT_NILAI_OPTIONS },
+  { id: 'ind-11', nomorSOP: 22, nama: 'Salam Penutup', bobot: 5, deskripsi: 'Petugas menutup percakapan dengan salam formal dan ucapan terima kasih.', skalaMin: 0, skalaMax: 100, pilihanNilai: DEFAULT_NILAI_OPTIONS },
 ];
 export const INITIAL_TICKETS: Ticket[] = [];
 export const INITIAL_EVALUATIONS: SamplingEvaluation[] = [];

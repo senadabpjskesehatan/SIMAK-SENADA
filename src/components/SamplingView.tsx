@@ -1031,8 +1031,8 @@ export const SamplingView: React.FC = () => {
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                           <div>
                             <div className="flex items-center gap-2">
-                              <span className="w-5 h-5 rounded-full bg-teal-700 text-white font-bold text-[10px] flex items-center justify-center">
-                                {idx + 1}
+                              <span className="min-w-6 h-6 px-1.5 rounded-lg bg-teal-700 text-white font-extrabold text-[10px] flex items-center justify-center">
+                                {ind.nomorSOP ?? idx + 1}
                               </span>
                               <h4 className="font-bold text-xs text-slate-900">{ind.nama}</h4>
                               <span className="text-[10px] font-bold bg-teal-100 text-teal-800 px-1.5 py-0.5 rounded">

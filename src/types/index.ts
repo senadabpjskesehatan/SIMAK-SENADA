@@ -41,6 +41,7 @@ export interface Indicator {
   nama: string;
   deskripsi: string;
   bobot: number;           // Persentase bobot nilai (e.g. 20)
+  nomorSOP?: number;       // Nomor urut baku SOP (1, 2, 14, 15, 16, 17, 18, 19, 20, 21, 22)
   skalaMin?: number;       // Skala minimal (default 0)
   skalaMax?: number;       // Skala maksimal (default 100)
   kriteriaContoh?: string[];
