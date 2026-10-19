@@ -986,7 +986,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       safeStorage.removeItem(STORAGE_KEYS.USER);
       setCurrentUser(targetUser);
       const roleAllowedTabs: Record<UserRole, string[]> = {
-        admin: ['dashboard', 'sampling', 'inbox-petugas', 'inbox-sanggah-qa', 'history', 'kalibrasi', 'indicators', 'google-sheet', 'users-management'],
+        admin: ['dashboard', 'kalibrasi', 'users-management'],
         pusat: ['dashboard', 'kalibrasi', 'indicators', 'history'],
         team_leader: ['dashboard', 'inbox-petugas', 'history'],
         petugas: ['dashboard', 'inbox-petugas', 'history'],
