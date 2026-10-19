@@ -423,10 +423,26 @@ export const GoogleSheetSyncView: React.FC = () => {
             </div>
           </div>
 
-          <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-[11px] text-slate-600 flex items-start gap-2.5">
-            <Database className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
-            <div>
-              <span className="font-bold text-slate-800">Prinsip Sinkronisasi:</span> Sinkronisasi ulang pada tautan yang sama akan mempertahankan data penilaian dan hanya menambahkan tiket baru yang belum ada. Apabila Anda memasukkan tautan baru, sistem akan menggantikan dataset lama dengan tiket dari tautan baru tersebut.
+          <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-[11px] text-slate-700 space-y-2">
+            <div className="flex items-center gap-2 font-bold text-slate-900">
+              <Database className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>Panduan Tombol Sinkronisasi Server (Terbaca di Semua User / Perangkat):</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+              <div className="p-2.5 rounded-lg bg-emerald-50/80 border border-emerald-200 text-emerald-950">
+                <span className="font-bold flex items-center gap-1.5 text-emerald-900 mb-0.5">
+                  <RefreshCw className="w-3.5 h-3.5 text-emerald-600" />
+                  Tombol &quot;Gunakan Data&quot;:
+                </span>
+                Menyimpan data baru yang telah disinkron pada server dan langsung terbaca di user lain. Data baru akan mengganti data lama di server (hanya data yang belum disampling). Data yang telah disampling &amp; dikalibrasi tetap tersimpan aman di server.
+              </div>
+              <div className="p-2.5 rounded-lg bg-teal-50/80 border border-teal-200 text-teal-950">
+                <span className="font-bold flex items-center gap-1.5 text-teal-900 mb-0.5">
+                  <Layers className="w-3.5 h-3.5 text-teal-600" />
+                  Tombol &quot;Tambah Data&quot;:
+                </span>
+                Melakukan penambahan data sampling baru. Data yang sebelumnya telah tersimpan di server tidak akan ditambahkan ulang agar tidak terjadi duplikasi data berdasarkan <strong>Nomor Tiket</strong> dan <strong>Tanggal Tiket</strong>.
+              </div>
             </div>
           </div>
         </form>

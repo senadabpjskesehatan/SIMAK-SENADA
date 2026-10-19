@@ -37,6 +37,9 @@ export const IndicatorManagerView: React.FC = () => {
 
   const [editingIndicator, setEditingIndicator] = useState<Indicator | null>(null);
   const [indicatorToDelete, setIndicatorToDelete] = useState<Indicator | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isResettingSOP, setIsResettingSOP] = useState(false);
+  const [isConfirmResetModalOpen, setIsConfirmResetModalOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [showQuickTable, setShowQuickTable] = useState(true);
 
@@ -199,12 +202,19 @@ export const IndicatorManagerView: React.FC = () => {
   const confirmDeleteIndicator = async () => {
     if (!indicatorToDelete) return;
     const target = indicatorToDelete;
-    setIndicatorToDelete(null);
-    const res = await deleteIndicator(target.id);
-    if (res && res.success === false) {
-      showToast(`Gagal menghapus: ${res.error || 'Terjadi kesalahan sistem'}`);
-    } else {
-      showToast(`Indikator "${target.nama}" berhasil dihapus.`);
+    setIsDeleting(true);
+    try {
+      const res = await deleteIndicator(target.id);
+      if (res && res.success === false) {
+        showToast(`Gagal menghapus: ${res.error || 'Terjadi kesalahan sistem'}`);
+      } else {
+        showToast(`Indikator "${target.nama}" berhasil dihapus dari sistem & server.`);
+      }
+    } catch (err: any) {
+      showToast(`Gagal menghapus indikator: ${err?.message || 'Kesalahan sistem'}`);
+    } finally {
+      setIsDeleting(false);
+      setIndicatorToDelete(null);
     }
   };
 
@@ -225,18 +235,7 @@ export const IndicatorManagerView: React.FC = () => {
     await updateIndicator(indId, { bobot: safeVal });
   };
 
-  // Apply Official Standard SOP Weights:
-  // 1. Salam Pembuka 5%
-  // 2. Menyapa Peserta 5%
-  // 14. Pemilihan Topik Masalah 10%
-  // 15. Analisis 15%
-  // 16. Akurasi Informasi 20%
-  // 17. Edukasi Tambahan 5%
-  // 18. Kesesuaian Tindak Lanjut 10%
-  // 19. Pemilihan Kata Dan Bahasa 10%
-  // 20. Kemampuan Presentasi 10%
-  // 21. Edukasi Rating 5%
-  // 22. Salam Penutup 5%
+  // Apply Official Standard SOP Weights
   const handleApplyOfficialStandardSOP = async () => {
     if (
       confirm(
@@ -260,9 +259,21 @@ export const IndicatorManagerView: React.FC = () => {
     }
   };
 
-  const handleResetToStandard = async () => {
-    await resetIndicators();
-    showToast('Indikator berhasil direset ke standar SOP resmi BPJS Kesehatan.');
+  const handleExecuteResetSOP = async () => {
+    setIsResettingSOP(true);
+    setIsConfirmResetModalOpen(false);
+    try {
+      const res = await resetIndicators();
+      if (res && res.success === false) {
+        showToast(`Gagal reset SOP: ${res.error || 'Terjadi kesalahan server'}`);
+      } else {
+        showToast('Indikator mutu berhasil direset ke standar SOP resmi BPJS Kesehatan (11 Indikator Baku).');
+      }
+    } catch (err: any) {
+      showToast(`Gagal reset SOP: ${err?.message || 'Kesalahan server'}`);
+    } finally {
+      setIsResettingSOP(false);
+    }
   };
 
   const isWeightValid = totalIndicatorWeight === 100;
@@ -321,12 +332,14 @@ export const IndicatorManagerView: React.FC = () => {
             </button>
 
             <button
-              onClick={handleResetToStandard}
-              className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition"
-              title="Reset ke indikator standar SOP"
+              type="button"
+              onClick={() => setIsConfirmResetModalOpen(true)}
+              disabled={isResettingSOP}
+              className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+              title="Reset ke indikator standar SOP resmi BPJS Kesehatan"
             >
-              <RotateCcw className="w-3.5 h-3.5" />
-              Reset SOP
+              <RotateCcw className={`w-3.5 h-3.5 ${isResettingSOP ? 'animate-spin text-teal-600' : ''}`} />
+              <span>{isResettingSOP ? 'Mereset SOP...' : 'Reset SOP'}</span>
             </button>
           </div>
         </div>
@@ -490,14 +503,25 @@ export const IndicatorManagerView: React.FC = () => {
                             : '0%'}
                         </td>
                         <td className="px-3.5 py-2.5 text-center">
-                          <button
-                            type="button"
-                            onClick={() => handleStartEdit(ind)}
-                            className="px-2.5 py-1 rounded border border-slate-200 hover:bg-slate-50 text-slate-600 font-semibold text-[11px] inline-flex items-center gap-1 transition"
-                          >
-                            <Edit2 className="w-3 h-3 text-slate-500" />
-                            Edit Detail
-                          </button>
+                          <div className="inline-flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleStartEdit(ind)}
+                              className="px-2 py-1 rounded border border-slate-200 hover:bg-slate-50 text-slate-600 font-semibold text-[11px] inline-flex items-center gap-1 transition cursor-pointer"
+                              title="Edit Detail & Rubrik Nilai"
+                            >
+                              <Edit2 className="w-3 h-3 text-slate-500" />
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(ind)}
+                              className="p-1 rounded border border-rose-200 hover:bg-rose-50 text-rose-500 hover:text-rose-700 transition cursor-pointer"
+                              title={`Hapus Indikator ${ind.nama}`}
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -1050,16 +1074,21 @@ export const IndicatorManagerView: React.FC = () => {
 
                 <div className="flex items-center gap-2">
                   <button
+                    type="button"
                     onClick={() => handleStartEdit(ind)}
-                    className="px-2.5 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 font-medium flex items-center gap-1 transition"
+                    className="px-2.5 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 font-medium flex items-center gap-1 transition cursor-pointer"
                   >
                     <Edit2 className="w-3 h-3 text-slate-500" />
                     Edit & Ceklist Nilai
                   </button>
                   <button
-                    onClick={() => handleDelete(ind)}
-                    className="p-1.5 rounded-lg border border-slate-200 hover:bg-rose-50 text-slate-400 hover:text-rose-600 transition"
-                    title="Hapus Indikator"
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDelete(ind);
+                    }}
+                    className="p-1.5 rounded-lg border border-rose-200 hover:bg-rose-50 text-rose-500 hover:text-rose-700 transition cursor-pointer"
+                    title={`Hapus Indikator ${ind.nama}`}
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
@@ -1080,8 +1109,10 @@ export const IndicatorManagerView: React.FC = () => {
                 <h3 className="text-sm font-bold">Konfirmasi Hapus Indikator Mutu</h3>
               </div>
               <button
+                type="button"
                 onClick={() => setIndicatorToDelete(null)}
-                className="p-1 rounded text-rose-200 hover:text-white transition"
+                disabled={isDeleting}
+                className="p-1 rounded text-rose-200 hover:text-white transition cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -1119,17 +1150,85 @@ export const IndicatorManagerView: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setIndicatorToDelete(null)}
-                  className="px-4 py-2 border border-slate-300 rounded-lg text-slate-700 font-semibold hover:bg-slate-50 transition"
+                  disabled={isDeleting}
+                  className="px-4 py-2 border border-slate-300 rounded-lg text-slate-700 font-semibold hover:bg-slate-50 transition cursor-pointer"
                 >
                   Batal
                 </button>
                 <button
                   type="button"
                   onClick={confirmDeleteIndicator}
-                  className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-bold shadow-xs flex items-center gap-1.5 transition"
+                  disabled={isDeleting}
+                  className="px-4 py-2 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white rounded-lg font-bold shadow-xs flex items-center gap-1.5 transition cursor-pointer"
                 >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  Ya, Hapus Indikator
+                  <Trash2 className={`w-3.5 h-3.5 ${isDeleting ? 'animate-spin' : ''}`} />
+                  {isDeleting ? 'Menghapus dari Server...' : 'Ya, Hapus Indikator'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reset SOP Confirmation Modal */}
+      {isConfirmResetModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full border border-slate-200 overflow-hidden">
+            <div className="bg-teal-700 px-6 py-4 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <RotateCcw className="w-5 h-5 text-white" />
+                <h3 className="text-sm font-bold">Reset ke Standar SOP Resmi BPJS</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsConfirmResetModalOpen(false)}
+                disabled={isResettingSOP}
+                className="p-1 rounded text-teal-200 hover:text-white transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <p className="text-xs text-slate-700 leading-relaxed">
+                Tindakan ini akan mengembalikan seluruh rubrik indikator dan bobot mutu ke <strong>11 Indikator Baku SOP BPJS Kesehatan</strong> dengan akumulasi bobot tepat 100%:
+              </p>
+
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 max-h-48 overflow-y-auto space-y-1.5 text-[11px]">
+                <div className="flex justify-between text-slate-700 font-medium"><span>1. Salam Pembuka</span><span className="font-bold text-teal-800">5%</span></div>
+                <div className="flex justify-between text-slate-700 font-medium"><span>2. Menyapa Peserta</span><span className="font-bold text-teal-800">5%</span></div>
+                <div className="flex justify-between text-slate-700 font-medium"><span>14. Pemilihan Topik Masalah</span><span className="font-bold text-teal-800">10%</span></div>
+                <div className="flex justify-between text-slate-700 font-medium"><span>15. Analisis</span><span className="font-bold text-teal-800">15%</span></div>
+                <div className="flex justify-between text-slate-700 font-medium"><span>16. Akurasi Informasi</span><span className="font-bold text-teal-800">20%</span></div>
+                <div className="flex justify-between text-slate-700 font-medium"><span>17. Edukasi Tambahan</span><span className="font-bold text-teal-800">5%</span></div>
+                <div className="flex justify-between text-slate-700 font-medium"><span>18. Kesesuaian Tindak Lanjut</span><span className="font-bold text-teal-800">10%</span></div>
+                <div className="flex justify-between text-slate-700 font-medium"><span>19. Pemilihan Kata Dan Bahasa</span><span className="font-bold text-teal-800">10%</span></div>
+                <div className="flex justify-between text-slate-700 font-medium"><span>20. Kemampuan Presentasi</span><span className="font-bold text-teal-800">10%</span></div>
+                <div className="flex justify-between text-slate-700 font-medium"><span>21. Edukasi Rating</span><span className="font-bold text-teal-800">5%</span></div>
+                <div className="flex justify-between text-slate-700 font-medium"><span>22. Salam Penutup</span><span className="font-bold text-teal-800">5%</span></div>
+              </div>
+
+              <div className="p-3 rounded-lg bg-teal-50 border border-teal-200 text-teal-900 text-[11px] leading-relaxed">
+                Data standar akan disimpan ke server Firestore dan disinkronkan secara real-time ke seluruh pengguna.
+              </div>
+
+              <div className="pt-3 border-t border-slate-200 flex items-center justify-end gap-2 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setIsConfirmResetModalOpen(false)}
+                  disabled={isResettingSOP}
+                  className="px-4 py-2 border border-slate-300 rounded-lg text-slate-700 font-semibold hover:bg-slate-50 transition cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExecuteResetSOP}
+                  disabled={isResettingSOP}
+                  className="px-4 py-2 bg-teal-700 hover:bg-teal-800 disabled:opacity-50 text-white rounded-lg font-bold shadow-xs flex items-center gap-1.5 transition cursor-pointer"
+                >
+                  <RotateCcw className={`w-3.5 h-3.5 ${isResettingSOP ? 'animate-spin' : ''}`} />
+                  {isResettingSOP ? 'Mereset ke Server...' : 'Ya, Terapkan Reset SOP'}
                 </button>
               </div>
             </div>

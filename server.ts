@@ -358,47 +358,48 @@ app.post('/api/proxy-sheet', async (req, res) => {
         const gvizUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&gid=${gid}`;
         const exportUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`;
 
-        // Try gviz first (fastest, direct CSV exporter from Google Sheets)
+        // Try official export?format=csv first (preserves ALL rows without GViz 500-limit or column type coercion)
         try {
-          const gvizRes = await fetch(gvizUrl, {
+          const expRes = await fetch(exportUrl, {
             headers: defaultHeaders,
             redirect: 'follow',
-            signal: AbortSignal.timeout(9000),
+            signal: AbortSignal.timeout(12000),
           });
-          const gvizText = await gvizRes.text();
+          const expText = await expRes.text();
           if (
-            gvizRes.ok &&
-            !gvizText.trim().startsWith('<!DOCTYPE') &&
-            !gvizText.trim().startsWith('<html') &&
-            gvizText.trim().length > 0
+            expRes.ok &&
+            !expText.trim().startsWith('<!DOCTYPE') &&
+            !expText.trim().startsWith('<html') &&
+            expText.trim().length > 0
           ) {
-            csvData = gvizText;
-            targetUrl = gvizUrl;
+            csvData = expText;
+            targetUrl = exportUrl;
           }
         } catch (e) {
-          console.warn('gviz fetch notice:', e);
+          console.warn('export fetch notice:', e);
         }
 
-        // If gviz failed or was empty, fallback to exportUrl
+        // If exportUrl was blocked or empty, try gvizUrl with unlimited query
         if (!csvData) {
           try {
-            const expRes = await fetch(exportUrl, {
+            const gvizFullUrl = `${gvizUrl}&tq=${encodeURIComponent('select *')}`;
+            const gvizRes = await fetch(gvizFullUrl, {
               headers: defaultHeaders,
               redirect: 'follow',
-              signal: AbortSignal.timeout(9000),
+              signal: AbortSignal.timeout(12000),
             });
-            const expText = await expRes.text();
+            const gvizText = await gvizRes.text();
             if (
-              expRes.ok &&
-              !expText.trim().startsWith('<!DOCTYPE') &&
-              !expText.trim().startsWith('<html') &&
-              expText.trim().length > 0
+              gvizRes.ok &&
+              !gvizText.trim().startsWith('<!DOCTYPE') &&
+              !gvizText.trim().startsWith('<html') &&
+              gvizText.trim().length > 0
             ) {
-              csvData = expText;
-              targetUrl = exportUrl;
+              csvData = gvizText;
+              targetUrl = gvizFullUrl;
             }
           } catch (e) {
-            console.warn('export fetch notice:', e);
+            console.warn('gviz fetch notice:', e);
           }
         }
 

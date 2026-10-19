@@ -68,6 +68,11 @@ const safeSetDoc = async (docRef: any, data: any, options?: any) => {
   }
 };
 
+export const toSafeDocId = (rawId: string): string => {
+  if (!rawId) return `DOC-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+  return String(rawId).trim().replace(/[\/\\]/g, '_').replace(/\s+/g, '_');
+};
+
 const batchSetDocs = async (items: { path: string; id: string; data: any }[]) => {
   if (!items || items.length === 0) return;
   const CHUNK_SIZE = 400;
@@ -76,14 +81,16 @@ const batchSetDocs = async (items: { path: string; id: string; data: any }[]) =>
     try {
       const batch = writeBatch(db);
       for (const item of chunk) {
-        const ref = doc(db, item.path, item.id);
+        const safeId = toSafeDocId(item.id);
+        const ref = doc(db, item.path, safeId);
         batch.set(ref, cleanFirestoreData(item.data));
       }
       await batch.commit();
     } catch (err) {
       handleFirestoreError(err, 'batchSetDocs', `${items[0]?.path || 'general'} chunk`);
       for (const item of chunk) {
-        await safeSetDoc(doc(db, item.path, item.id), item.data);
+        const safeId = toSafeDocId(item.id);
+        await safeSetDoc(doc(db, item.path, safeId), item.data);
       }
     }
   }
@@ -221,15 +228,15 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 const STORAGE_KEYS = {
-  USER: 'senada_user_session_v10',
-  SESSION_START: 'senada_session_start_v10',
-  SESSION_EXPIRES: 'senada_session_expires_v10',
-  USERS_LIST: 'senada_users_list_v10_nodata',
-  INDICATORS: 'senada_indicators_v10_nodata',
-  TICKETS: 'senada_tickets_v10_nodata',
-  EVALUATIONS: 'senada_evaluations_v10_nodata',
-  CALIBRATIONS: 'senada_calibrations_v10_nodata',
-  SHEET: 'senada_sheet_v10_nodata',
+  USER: 'senada_user_session_v11',
+  SESSION_START: 'senada_session_start_v11',
+  SESSION_EXPIRES: 'senada_session_expires_v11',
+  USERS_LIST: 'senada_users_list_v11_persistent',
+  INDICATORS: 'senada_indicators_v11_persistent',
+  TICKETS: 'senada_tickets_v11_persistent',
+  EVALUATIONS: 'senada_evaluations_v11_persistent',
+  CALIBRATIONS: 'senada_calibrations_v11_persistent',
+  SHEET: 'senada_sheet_v11_persistent',
 };
 
 // Maximum session duration: 60 minutes (3,600,000 ms)
@@ -384,9 +391,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           setUsers(usersList);
           safeStorage.setItem(STORAGE_KEYS.USERS_LIST, JSON.stringify(usersList));
         } else {
-          for (const u of INITIAL_USERS) {
-            await safeSetDoc(doc(db, 'users', u.id), u);
-          }
+          const batchItems = INITIAL_USERS.map((u) => ({
+            path: 'users',
+            id: u.id,
+            data: u,
+          }));
+          await batchSetDocs(batchItems);
           setUsers(INITIAL_USERS);
         }
       },
@@ -422,7 +432,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const indList: Indicator[] = [];
         snapshot.forEach((docSnap) => {
           const data = docSnap.data();
-          indList.push({ id: docSnap.id, ...data } as Indicator);
+          indList.push({ ...data, id: docSnap.id || data.id } as Indicator);
         });
         if (indList.length > 0) {
           indList.sort((a, b) => {
@@ -505,17 +515,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       collection(db, 'tickets'),
       (snapshot) => {
         const ticketsList: Ticket[] = [];
-        snapshot.forEach((doc) => {
-          const t = doc.data() as Ticket;
+        snapshot.forEach((docSnap) => {
+          const t = docSnap.data() as Ticket;
           ticketsList.push({
             ...t,
             kategori: cleanCategory(t.kategori),
           });
         });
-        if (ticketsList.length > 0 || tickets.length === 0) {
-          setTickets(ticketsList);
-          safeStorage.setItem(STORAGE_KEYS.TICKETS, JSON.stringify(ticketsList));
-        }
+        setTickets(ticketsList);
+        safeStorage.setItem(STORAGE_KEYS.TICKETS, JSON.stringify(ticketsList));
       },
       (error) => {
         handleFirestoreError(error, 'onSnapshot', 'tickets');
@@ -547,13 +555,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       collection(db, 'evaluations'),
       (snapshot) => {
         const evalList: SamplingEvaluation[] = [];
-        snapshot.forEach((doc) => {
-          evalList.push(doc.data() as SamplingEvaluation);
+        snapshot.forEach((docSnap) => {
+          evalList.push(docSnap.data() as SamplingEvaluation);
         });
-        if (evalList.length > 0 || evaluations.length === 0) {
-          setEvaluations(evalList);
-          safeStorage.setItem(STORAGE_KEYS.EVALUATIONS, JSON.stringify(evalList));
-        }
+        setEvaluations(evalList);
+        safeStorage.setItem(STORAGE_KEYS.EVALUATIONS, JSON.stringify(evalList));
       },
       (error) => {
         handleFirestoreError(error, 'onSnapshot', 'evaluations');
@@ -585,13 +591,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       collection(db, 'calibrations'),
       (snapshot) => {
         const calList: CalibrationRecord[] = [];
-        snapshot.forEach((doc) => {
-          calList.push(doc.data() as CalibrationRecord);
+        snapshot.forEach((docSnap) => {
+          calList.push(docSnap.data() as CalibrationRecord);
         });
-        if (calList.length > 0 || calibrations.length === 0) {
-          setCalibrations(calList);
-          safeStorage.setItem(STORAGE_KEYS.CALIBRATIONS, JSON.stringify(calList));
-        }
+        setCalibrations(calList);
+        safeStorage.setItem(STORAGE_KEYS.CALIBRATIONS, JSON.stringify(calList));
       },
       (error) => {
         handleFirestoreError(error, 'onSnapshot', 'calibrations');
@@ -947,7 +951,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 88;DINDA MUTIA HIDAYATI;260387;260387;kualitas99;Petugas;6
 89;WIDURI PUTRI NINGSIH;260544;260544;kualitas99;Petugas;6
 90;PUTRI VADIA DHAMAYANTI;260516;260516;kualitas99;Petugas;4`;
-    const lines = rawData.split('\\n').slice(1);
+    const lines = rawData.split('\n').map((l) => l.trim()).filter(Boolean).slice(1);
     const newUsers: Omit<User, 'id'>[] = lines.map(line => {
       const [no, name, nip, username, password, roleLabel, team] = line.split(';');
       let role: UserRole = 'petugas';
@@ -1195,6 +1199,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const deleteIndicator = async (id: string): Promise<{ success: boolean; error?: string }> => {
     if (!id) return { success: false, error: 'ID indikator tidak valid' };
 
+    const targetInd = indicators.find((i) => i.id === id);
     setIndicators((prev) => {
       const next = prev.filter((ind) => ind.id !== id);
       safeStorage.setItem(STORAGE_KEYS.INDICATORS, JSON.stringify(next));
@@ -1202,18 +1207,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     });
 
     try {
-      await deleteDoc(doc(db, 'indicators', id));
-      const q = query(collection(db, 'indicators'), where('id', '==', id));
-      const snap = await getDocs(q);
+      await deleteDoc(doc(db, 'indicators', toSafeDocId(id)));
+      const snap = await getDocs(collection(db, 'indicators'));
       for (const d of snap.docs) {
-        if (d.id !== id) {
+        const dData = d.data();
+        if (d.id === id || dData.id === id || (targetInd && dData.nama === targetInd.nama)) {
           await deleteDoc(d.ref);
         }
       }
       return { success: true };
     } catch (e: any) {
-      console.warn('Firestore deleteIndicator deferred:', e);
-      return { success: true };
+      console.warn('Firestore deleteIndicator error:', e);
+      return { success: false, error: e?.message || 'Gagal menghapus indikator di server' };
     }
   };
 
@@ -1222,18 +1227,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     safeStorage.setItem(STORAGE_KEYS.INDICATORS, JSON.stringify(INITIAL_INDICATORS));
     try {
       const snap = await getDocs(collection(db, 'indicators'));
-      const initialIds = new Set(INITIAL_INDICATORS.map((i) => i.id));
+      const batch = writeBatch(db);
       for (const d of snap.docs) {
-        if (!initialIds.has(d.id)) {
-          await deleteDoc(doc(db, 'indicators', d.id));
-        }
+        batch.delete(d.ref);
       }
       for (const ind of INITIAL_INDICATORS) {
-        await safeSetDoc(doc(db, 'indicators', ind.id), ind);
+        const ref = doc(db, 'indicators', ind.id);
+        batch.set(ref, cleanFirestoreData(ind));
       }
+      await batch.commit();
       return { success: true };
     } catch (e: any) {
       console.warn('Reset indicators Firestore deferred:', e);
+      for (const ind of INITIAL_INDICATORS) {
+        await safeSetDoc(doc(db, 'indicators', ind.id), ind);
+      }
       return { success: true };
     }
   };
@@ -1322,26 +1330,51 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
           if (sheetIdMatch) {
             const sheetId = sheetIdMatch[1];
+            // Try official export?format=csv first to avoid GViz limits & gaps
             try {
               const controller = new AbortController();
-              const timeoutId = setTimeout(() => controller.abort(), 30000);
-              const gvizDirect = await fetch(
-                `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&gid=${gid}`,
+              const timeoutId = setTimeout(() => controller.abort(), 20000);
+              const expDirect = await fetch(
+                `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`,
                 { signal: controller.signal }
               );
               clearTimeout(timeoutId);
-              const gvizText = await gvizDirect.text();
+              const expText = await expDirect.text();
               if (
-                gvizDirect.ok &&
-                gvizText.trim() &&
-                !gvizText.trim().startsWith('<!DOCTYPE') &&
-                !gvizText.trim().startsWith('<html')
+                expDirect.ok &&
+                expText.trim() &&
+                !expText.trim().startsWith('<!DOCTYPE') &&
+                !expText.trim().startsWith('<html')
               ) {
-                rawData = gvizText;
+                rawData = expText;
                 fetchError = null;
               }
             } catch {
-              // ignore
+              // fallback to gviz
+            }
+
+            if (!rawData) {
+              try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 20000);
+                const gvizDirect = await fetch(
+                  `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&gid=${gid}&tq=${encodeURIComponent('select *')}`,
+                  { signal: controller.signal }
+                );
+                clearTimeout(timeoutId);
+                const gvizText = await gvizDirect.text();
+                if (
+                  gvizDirect.ok &&
+                  gvizText.trim() &&
+                  !gvizText.trim().startsWith('<!DOCTYPE') &&
+                  !gvizText.trim().startsWith('<html')
+                ) {
+                  rawData = gvizText;
+                  fetchError = null;
+                }
+              } catch {
+                // ignore
+              }
             }
           }
         }
@@ -1388,17 +1421,26 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           ...existingTickets.filter((t) => t.sampled).map((t) => t.nomorTiket),
         ]);
 
+        // 1. Delete old unsampled tickets from Firestore so new data truly replaces them on server
+        const oldUnsampledDocsToDelete = existingTickets
+          .filter((t) => !sampledTicketIds.has(t.nomorTiket) && !t.sampled)
+          .map((t) => doc(db, 'tickets', toSafeDocId(t.nomorTiket)));
+
+        if (oldUnsampledDocsToDelete.length > 0) {
+          await batchDeleteDocs(oldUnsampledDocsToDelete);
+        }
+
         const existingMap = new Map(existingTickets.map((t) => [t.nomorTiket, t]));
         const newMap = new Map<string, Ticket>();
 
-        // 1. Keep sampled / calibrated tickets from server
+        // 2. Keep sampled / calibrated tickets from server
         for (const [id, t] of existingMap.entries()) {
           if (sampledTicketIds.has(id) || t.sampled) {
             newMap.set(id, t);
           }
         }
 
-        // 2. Add or update unsampled tickets from parsed sheet data
+        // 3. Add or update unsampled tickets from parsed sheet data
         for (const newT of parsed.data) {
           const id = newT.nomorTiket;
           if (newMap.has(id)) {
@@ -1522,7 +1564,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       }
 
       totalCount = existingMap.size;
-      setTickets(Array.from(existingMap.values()));
+      const finalTickets = Array.from(existingMap.values());
+      setTickets(finalTickets);
+      safeStorage.setItem(STORAGE_KEYS.TICKETS, JSON.stringify(finalTickets));
 
       const now = new Date().toISOString().replace('T', ' ').slice(0, 16);
       const newConfig = {

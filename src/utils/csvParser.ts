@@ -239,17 +239,31 @@ export function rowsToTickets(
     return { data: [], headers: [], rawCount: 0 };
   }
 
-  const rawHeaders = (rows[0] || []).map((h) => String(h || '').trim());
+  // Smart Header Row Detection: Find the row among first 6 rows that best matches standard keys
+  let headerRowIndex = 0;
+  let maxMatchedKeys = 0;
+  const standardKeySet = new Set([
+    'nomorTiket', 'tanggalTiket', 'kategori', 'pokokMasalah', 'topikMasalah',
+    'isiKeluhan', 'isiJawaban', 'rating', 'namaPetugas'
+  ]);
+
+  for (let r = 0; r < Math.min(6, rows.length); r++) {
+    const candidateHeaders = (rows[r] || []).map((h) => String(h || '').trim());
+    const matched = candidateHeaders.map(normalizeColumnKey).filter((k) => standardKeySet.has(k));
+    if (matched.length > maxMatchedKeys) {
+      maxMatchedKeys = matched.length;
+      headerRowIndex = r;
+    }
+  }
+
+  // If at least 1 key matched, use that row as header; otherwise fallback to row 0
+  const rawHeaders = (rows[headerRowIndex] || []).map((h) => String(h || '').trim());
   const mappedKeys = rawHeaders.map(normalizeColumnKey);
 
-  // Check which keys we successfully mapped
-  const hasNomorTiket = mappedKeys.includes('nomorTiket');
-  const hasKeluhan = mappedKeys.includes('isiKeluhan');
-  const hasJawaban = mappedKeys.includes('isiJawaban');
-
   const tickets: Ticket[] = [];
+  const startRow = maxMatchedKeys > 0 ? headerRowIndex + 1 : 1;
 
-  for (let r = 1; r < rows.length; r++) {
+  for (let r = startRow; r < rows.length; r++) {
     const row = rows[r];
     if (!row || !Array.isArray(row) || row.every((c) => c === '' || c === undefined || c === null)) {
       continue;
@@ -531,29 +545,50 @@ export function parseCSV(csvText: string): { data: Ticket[]; headers: string[]; 
       }
     }
 
+    let fastResult: { data: Ticket[]; headers: string[]; rawCount: number } | null = null;
     if (rows.length >= 2) {
-      const result = rowsToTickets(rows, 'fast-csv');
-      if (result.data.length > 0) {
-        return result;
-      }
+      fastResult = rowsToTickets(rows, 'fast-csv');
     }
-  } catch (err) {
-    console.warn('Fast CSV parser warning, attempting SheetJS fallback:', err);
-  }
 
-  // 4. Fallback to SheetJS (XLSX) if fast parser found no valid tickets
-  try {
-    const workbook = XLSX.read(trimmed, { type: 'string', raw: false });
-    const sheetName = workbook.SheetNames[0];
-    if (sheetName) {
-      const sheet = workbook.Sheets[sheetName];
-      const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
-      if (rows && rows.length >= 2) {
-        return rowsToTickets(rows, 'xlsx-csv');
+    // 4. Also run SheetJS (XLSX) to ensure RFC 4180 multiline cells and complex CSVs are fully captured
+    let xlsxResult: { data: Ticket[]; headers: string[]; rawCount: number } | null = null;
+    try {
+      const workbook = XLSX.read(trimmed, { type: 'string', raw: false });
+      const sheetName = workbook.SheetNames[0];
+      if (sheetName) {
+        const sheet = workbook.Sheets[sheetName];
+        const sheetRows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+        if (sheetRows && sheetRows.length >= 2) {
+          xlsxResult = rowsToTickets(sheetRows, 'xlsx-csv');
+        }
       }
+    } catch (xlsxErr) {
+      console.warn('XLSX.read CSV error:', xlsxErr);
+    }
+
+    // Compare and pick whichever parser captured MORE valid tickets (eliminating any gap)
+    const fastCount = fastResult?.data?.length || 0;
+    const xlsxCount = xlsxResult?.data?.length || 0;
+
+    if (xlsxCount >= fastCount && xlsxCount > 0 && xlsxResult) {
+      return xlsxResult;
+    }
+    if (fastCount > 0 && fastResult) {
+      return fastResult;
     }
   } catch (err) {
-    console.warn('XLSX.read CSV error:', err);
+    console.warn('CSV parsing exception, attempting SheetJS fallback:', err);
+    try {
+      const workbook = XLSX.read(trimmed, { type: 'string', raw: false });
+      const sheetName = workbook.SheetNames[0];
+      if (sheetName) {
+        const sheet = workbook.Sheets[sheetName];
+        const sheetRows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+        if (sheetRows && sheetRows.length >= 2) {
+          return rowsToTickets(sheetRows, 'xlsx-fallback');
+        }
+      }
+    } catch {}
   }
 
   return { data: [], headers: [], rawCount: 0 };
