@@ -476,8 +476,28 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return () => unsubscribe();
   }, []);
 
-  // 5. Tickets (Tanpa Data Default - semata-mata berasal dari sinkronisasi Google Sheet)
-  const [tickets, setTickets] = useState<Ticket[]>([]);
+  // 5. Tickets synced with Firestore & localStorage cache
+  const [tickets, setTickets] = useState<Ticket[]>(() => {
+    const saved = safeStorage.getItem(STORAGE_KEYS.TICKETS);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.map((t: Ticket) => ({
+            ...t,
+            kategori: cleanCategory(t.kategori),
+          }));
+        }
+      } catch {
+        // fallback
+      }
+    }
+    return [];
+  });
+
+  useEffect(() => {
+    safeStorage.setItem(STORAGE_KEYS.TICKETS, JSON.stringify(tickets));
+  }, [tickets]);
 
   useEffect(() => {
     const unsubscribe = onSnapshot(
@@ -491,18 +511,36 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             kategori: cleanCategory(t.kategori),
           });
         });
-        setTickets(ticketsList);
+        if (ticketsList.length > 0 || tickets.length === 0) {
+          setTickets(ticketsList);
+          safeStorage.setItem(STORAGE_KEYS.TICKETS, JSON.stringify(ticketsList));
+        }
       },
       (error) => {
         handleFirestoreError(error, 'onSnapshot', 'tickets');
-        setTickets([]);
       }
     );
     return () => unsubscribe();
   }, []);
 
-  // 6. Sampling Evaluations synced with Firestore
-  const [evaluations, setEvaluations] = useState<SamplingEvaluation[]>([]);
+  // 6. Sampling Evaluations synced with Firestore & localStorage cache
+  const [evaluations, setEvaluations] = useState<SamplingEvaluation[]>(() => {
+    const saved = safeStorage.getItem(STORAGE_KEYS.EVALUATIONS);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      } catch {
+        // fallback
+      }
+    }
+    return [];
+  });
+
+  useEffect(() => {
+    safeStorage.setItem(STORAGE_KEYS.EVALUATIONS, JSON.stringify(evaluations));
+  }, [evaluations]);
+
   useEffect(() => {
     const unsubscribe = onSnapshot(
       collection(db, 'evaluations'),
@@ -511,7 +549,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         snapshot.forEach((doc) => {
           evalList.push(doc.data() as SamplingEvaluation);
         });
-        setEvaluations(evalList);
+        if (evalList.length > 0 || evaluations.length === 0) {
+          setEvaluations(evalList);
+          safeStorage.setItem(STORAGE_KEYS.EVALUATIONS, JSON.stringify(evalList));
+        }
       },
       (error) => {
         handleFirestoreError(error, 'onSnapshot', 'evaluations');
@@ -520,8 +561,24 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return () => unsubscribe();
   }, []);
 
-  // 7. Calibrations synced with Firestore
-  const [calibrations, setCalibrations] = useState<CalibrationRecord[]>([]);
+  // 7. Calibrations synced with Firestore & localStorage cache
+  const [calibrations, setCalibrations] = useState<CalibrationRecord[]>(() => {
+    const saved = safeStorage.getItem(STORAGE_KEYS.CALIBRATIONS);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      } catch {
+        // fallback
+      }
+    }
+    return [];
+  });
+
+  useEffect(() => {
+    safeStorage.setItem(STORAGE_KEYS.CALIBRATIONS, JSON.stringify(calibrations));
+  }, [calibrations]);
+
   useEffect(() => {
     const unsubscribe = onSnapshot(
       collection(db, 'calibrations'),
@@ -530,7 +587,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         snapshot.forEach((doc) => {
           calList.push(doc.data() as CalibrationRecord);
         });
-        setCalibrations(calList);
+        if (calList.length > 0 || calibrations.length === 0) {
+          setCalibrations(calList);
+          safeStorage.setItem(STORAGE_KEYS.CALIBRATIONS, JSON.stringify(calList));
+        }
       },
       (error) => {
         handleFirestoreError(error, 'onSnapshot', 'calibrations');
@@ -539,19 +599,37 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return () => unsubscribe();
   }, []);
 
-  // 8. Google Sheet Config synced with Firestore
-  const [sheetConfig, setSheetConfig] = useState<GoogleSheetConfig>({
-    url: '',
-    autoSync: false,
-    totalSyncedRows: 0,
-    status: 'idle',
+  // 8. Google Sheet Config synced with Firestore & localStorage cache
+  const [sheetConfig, setSheetConfig] = useState<GoogleSheetConfig>(() => {
+    const saved = safeStorage.getItem(STORAGE_KEYS.SHEET);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object') return parsed;
+      } catch {
+        // fallback
+      }
+    }
+    return {
+      url: '',
+      autoSync: false,
+      totalSyncedRows: 0,
+      status: 'idle',
+    };
   });
+
+  useEffect(() => {
+    safeStorage.setItem(STORAGE_KEYS.SHEET, JSON.stringify(sheetConfig));
+  }, [sheetConfig]);
+
   useEffect(() => {
     const unsubscribe = onSnapshot(
       doc(db, 'config', 'sheetConfig'),
       (docSnap) => {
         if (docSnap.exists()) {
-          setSheetConfig(docSnap.data() as GoogleSheetConfig);
+          const cfg = docSnap.data() as GoogleSheetConfig;
+          setSheetConfig(cfg);
+          safeStorage.setItem(STORAGE_KEYS.SHEET, JSON.stringify(cfg));
         }
       },
       (error) => {
