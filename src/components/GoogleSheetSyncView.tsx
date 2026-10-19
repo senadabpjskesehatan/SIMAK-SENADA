@@ -67,16 +67,16 @@ export const GoogleSheetSyncView: React.FC = () => {
   ];
 
   // Handler for Google Sheet URL Sync
-  const handleSyncGoogleSheet = async (e: React.FormEvent) => {
+  const handleSyncGoogleSheet = async (e: React.FormEvent, mode: 'use_data' | 'append_data' = 'use_data') => {
     e.preventDefault();
     if (!inputUrl.trim()) return;
 
     setIsSyncing(true);
     setSyncProgress(5);
-    setSyncStepText('Memulai inisialisasi tautan Google Sheet...');
+    setSyncStepText(mode === 'use_data' ? 'Memulai sinkronisasi (Gunakan Data)...' : 'Memulai sinkronisasi (Tambah Data)...');
     setSyncStatus(null);
 
-    const result = await syncGoogleSheet(inputUrl.trim(), (pct, text) => {
+    const result = await syncGoogleSheet(inputUrl.trim(), mode, (pct, text) => {
       setSyncProgress(pct);
       setSyncStepText(text);
     });
@@ -86,7 +86,7 @@ export const GoogleSheetSyncView: React.FC = () => {
       success: result.success,
       message: result.message,
       count: result.count,
-      source: 'Google Sheet Publik',
+      source: mode === 'use_data' ? 'Gunakan Data (Perbarui Server)' : 'Tambah Data (Append Tanpa Duplikasi)',
     });
     setCurrentPage(1);
   };
@@ -321,7 +321,7 @@ export const GoogleSheetSyncView: React.FC = () => {
                 setIsSyncing(true);
                 setSyncProgress(10);
                 setSyncStepText('Menjalankan sinkron ulang untuk menambahkan data baru...');
-                syncGoogleSheet(sheetConfig.url, (pct, text) => {
+                syncGoogleSheet(sheetConfig.url, 'append_data', (pct: number, text: string) => {
                   setSyncProgress(pct);
                   setSyncStepText(text);
                 }).then((res) => {
@@ -380,14 +380,28 @@ export const GoogleSheetSyncView: React.FC = () => {
                 className="w-full px-3.5 py-2.5 text-xs rounded-xl border border-slate-300 bg-white focus:ring-2 focus:ring-emerald-500 font-mono shadow-2xs"
               />
             </div>
-            <button
-              type="submit"
-              disabled={isSyncing}
-              className="w-full sm:w-auto px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow-xs flex items-center justify-center gap-2 transition shrink-0 cursor-pointer"
-            >
-              <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
-              {isSyncing ? 'Menyinkronkan...' : 'Sinkronkan Sekarang'}
-            </button>
+            <div className="flex items-center gap-2 w-full sm:w-auto shrink-0">
+              <button
+                type="button"
+                onClick={(e) => handleSyncGoogleSheet(e, 'use_data')}
+                disabled={isSyncing}
+                className="px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow-xs flex items-center justify-center gap-1.5 transition cursor-pointer shrink-0"
+                title="Simpan & ganti data baru di server. Data yang sudah disampling/dikalibrasi tetap aman."
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+                {isSyncing ? 'Memproses...' : 'Gunakan Data'}
+              </button>
+              <button
+                type="button"
+                onClick={(e) => handleSyncGoogleSheet(e, 'append_data')}
+                disabled={isSyncing}
+                className="px-4 py-2.5 bg-teal-700 hover:bg-teal-800 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow-xs flex items-center justify-center gap-1.5 transition cursor-pointer shrink-0"
+                title="Menambahkan data sampling baru tanpa duplikasi berdasarkan nomor tiket & tanggal tiket."
+              >
+                <Layers className="w-3.5 h-3.5" />
+                Tambah Data
+              </button>
+            </div>
           </div>
 
           {/* Quick Guidance Box for Google Sheet & Webservice */}

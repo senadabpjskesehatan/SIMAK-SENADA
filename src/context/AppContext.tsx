@@ -141,6 +141,7 @@ interface AppContextType {
   sheetConfig: GoogleSheetConfig;
   syncGoogleSheet: (
     customUrl?: string,
+    mode?: 'use_data' | 'append_data',
     onProgress?: (percent: number, stepText: string) => void
   ) => Promise<{ success: boolean; message: string; count?: number; error?: string }>;
   importExcelFile: (
@@ -1241,6 +1242,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // Google Sheet & CSV/Excel Sync Handlers
   const syncGoogleSheet = async (
     customUrl?: string,
+    mode: 'use_data' | 'append_data' = 'use_data',
     onProgress?: (percent: number, stepText: string) => void
   ): Promise<{ success: boolean; message: string; count?: number; error?: string }> => {
     const targetUrl = customUrl || sheetConfig.url;
@@ -1272,7 +1274,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           try {
             json = JSON.parse(rawText);
           } catch {
-            // rawText might be direct CSV or plaintext
             if (res.ok && !rawText.trim().startsWith('<!DOCTYPE') && !rawText.trim().startsWith('<html')) {
               rawData = rawText;
             }
@@ -1291,11 +1292,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         fetchError = err?.message || 'Gagal menghubungi server proxy';
       }
 
-      // 2. Direct browser fetch fallback (for Google Apps Script Web Apps with CORS or public CSVs)
+      // 2. Direct browser fetch fallback
       if (!rawData) {
         onProgress?.(50, 'Mencoba koneksi langsung ke webservice/spreadsheet...');
         try {
-          // Direct fetch
           const directRes = await fetch(targetUrl, {
             headers: { Accept: 'application/json, text/csv, text/plain, */*' },
           });
@@ -1313,7 +1313,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           console.warn('Direct fetch notice:', directErr);
         }
 
-        // If direct fetch didn't work and URL is a standard Google Sheet, try client-side gviz URL
         if (!rawData) {
           const sheetIdMatch =
             targetUrl.match(/\/spreadsheets(?:\/u\/\d+)?\/d\/([a-zA-Z0-9-_]+)/) ||
@@ -1355,62 +1354,98 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         throw new Error(detailedMsg);
       }
 
-      onProgress?.(65, 'Menganalisis baris data & memetakan 9 kolom standar...');
+      onProgress?.(65, 'Menganalisis baris data & memetakan kolom standar tanpa gap...');
 
       const parsed = parseCSV(rawData);
       if (parsed.data.length === 0) {
         throw new Error(
-          'Tidak ada baris data tiket valid yang dapat diimpor dari tautan tersebut. Pastikan berkas memiliki header kolom atau data tiket (nomor tiket, isi keluhan, isi jawaban).'
+          'Tidak ada baris data tiket valid yang dapat diimpor dari tautan tersebut. Pastikan berkas memiliki header kolom atau data tiket.'
         );
       }
 
-      onProgress?.(85, `Memproses ${parsed.data.length} tiket secara batch...`);
+      onProgress?.(85, `Memproses ${parsed.data.length} tiket dan memeriksa status sampling/kalibrasi...`);
 
-      const isNewLink = sheetConfig.url && sheetConfig.url.trim() !== '' && sheetConfig.url !== targetUrl;
+      // Fetch latest existing tickets from Firestore server
+      let existingTickets: Ticket[] = tickets;
+      try {
+        const snap = await getDocs(collection(db, 'tickets'));
+        const remoteList: Ticket[] = [];
+        snap.forEach((d) => remoteList.push(d.data() as Ticket));
+        if (remoteList.length > 0) existingTickets = remoteList;
+      } catch {
+        // use state tickets
+      }
+
       let addedCount = 0;
       let totalCount = 0;
+      const itemsToSet: { path: string; id: string; data: Ticket }[] = [];
 
-      if (isNewLink) {
-        // Fast batch delete previous data
-        const [ticketSnap, evalSnap, calSnap] = await Promise.all([
-          getDocs(collection(db, 'tickets')),
-          getDocs(collection(db, 'evaluations')),
-          getDocs(collection(db, 'calibrations')),
+      if (mode === 'use_data') {
+        // "Gunakan Data": Replace unsampled tickets on server, but KEEP sampled & calibrated tickets intact
+        const sampledTicketIds = new Set([
+          ...evaluations.map((e) => e.nomorTiket),
+          ...calibrations.map((c) => c.nomorTiket),
+          ...existingTickets.filter((t) => t.sampled).map((t) => t.nomorTiket),
         ]);
 
-        await Promise.all([
-          batchDeleteDocs(ticketSnap.docs),
-          batchDeleteDocs(evalSnap.docs),
-          batchDeleteDocs(calSnap.docs),
-        ]);
+        const existingMap = new Map(existingTickets.map((t) => [t.nomorTiket, t]));
+        const newMap = new Map<string, Ticket>();
 
-        // Batch set all parsed tickets
-        const itemsToSet = parsed.data.map((t) => ({
-          path: 'tickets',
-          id: t.nomorTiket,
-          data: t,
-        }));
-        await batchSetDocs(itemsToSet);
+        // 1. Keep sampled / calibrated tickets from server
+        for (const [id, t] of existingMap.entries()) {
+          if (sampledTicketIds.has(id) || t.sampled) {
+            newMap.set(id, t);
+          }
+        }
 
-        totalCount = parsed.data.length;
-        addedCount = parsed.data.length;
-        setTickets(parsed.data);
+        // 2. Add or update unsampled tickets from parsed sheet data
+        for (const newT of parsed.data) {
+          const id = newT.nomorTiket;
+          if (newMap.has(id)) {
+            continue; // already sampled, preserve it
+          }
+          const normalized: Ticket = {
+            ...newT,
+            kategori: cleanCategory(newT.kategori),
+            sampled: false,
+          };
+          newMap.set(id, normalized);
+          addedCount++;
+          itemsToSet.push({ path: 'tickets', id, data: normalized });
+        }
+
+        if (itemsToSet.length > 0) {
+          await batchSetDocs(itemsToSet);
+        }
+
+        const finalTickets = Array.from(newMap.values());
+        totalCount = finalTickets.length;
+        setTickets(finalTickets);
+        safeStorage.setItem(STORAGE_KEYS.TICKETS, JSON.stringify(finalTickets));
       } else {
-        const existingMap = new Map(tickets.map((t) => [t.nomorTiket, t]));
-        const itemsToSet: { path: string; id: string; data: Ticket }[] = [];
+        // "Tambah Data": Append new tickets without duplication based on nomorTiket and tanggalTiket
+        const existingKeys = new Set(
+          existingTickets.map((t) => `${t.nomorTiket.trim().toLowerCase()}_${t.tanggalTiket}`.trim())
+        );
+        const existingIds = new Set(existingTickets.map((t) => t.nomorTiket.trim().toLowerCase()));
+
+        const newMap = new Map(existingTickets.map((t) => [t.nomorTiket, t]));
 
         for (const newT of parsed.data) {
-          const oldT = existingMap.get(newT.nomorTiket);
-          if (!oldT) {
-            // Tiket baru yang belum ada pada sistem: ditambahkan tanpa menghapus atau mengganti data lama
+          const key = `${newT.nomorTiket.trim().toLowerCase()}_${newT.tanggalTiket}`.trim();
+          const id = newT.nomorTiket.trim().toLowerCase();
+
+          if (!existingKeys.has(key) && !existingIds.has(id)) {
             addedCount++;
-            const normalizedT: Ticket = {
+            const normalized: Ticket = {
               ...newT,
               kategori: cleanCategory(newT.kategori),
               sampled: false,
             };
-            existingMap.set(newT.nomorTiket, normalizedT);
-            itemsToSet.push({ path: 'tickets', id: newT.nomorTiket, data: normalizedT });
+            newMap.set(newT.nomorTiket, normalized);
+            itemsToSet.push({ path: 'tickets', id: newT.nomorTiket, data: normalized });
+            existingKeys.add(key);
+            existingIds.add(id);
           }
         }
 
@@ -1418,8 +1453,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           await batchSetDocs(itemsToSet);
         }
 
-        totalCount = existingMap.size;
-        setTickets(Array.from(existingMap.values()));
+        const finalTickets = Array.from(newMap.values());
+        totalCount = finalTickets.length;
+        setTickets(finalTickets);
+        safeStorage.setItem(STORAGE_KEYS.TICKETS, JSON.stringify(finalTickets));
       }
 
       const now = new Date().toISOString().replace('T', ' ').slice(0, 16);
@@ -1432,22 +1469,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       };
       setSheetConfig(newConfig);
       await safeSetDoc(doc(db, 'config', 'sheetConfig'), newConfig);
+      safeStorage.setItem(STORAGE_KEYS.SHEET, JSON.stringify(newConfig));
 
-      if (isNewLink) {
-        onProgress?.(100, `Sinkronisasi selesai! Data baru menggantikan data sebelumnya (${totalCount} tiket).`);
-        return {
-          success: true,
-          message: `Sinkronisasi berhasil. Link baru disinkronkan, data sebelumnya digantikan dengan ${totalCount} tiket baru.`,
-          count: totalCount,
-        };
-      } else {
-        onProgress?.(100, `Sinkronisasi selesai! ${addedCount} data baru ditambahkan (Total: ${totalCount} tiket).`);
-        return {
-          success: true,
-          message: `Sinkronisasi berhasil. ${addedCount} data baru ditambahkan, total: ${totalCount} tiket aktif.`,
-          count: totalCount,
-        };
-      }
+      onProgress?.(100, `Sinkronisasi selesai! ${addedCount} data baru diproses (Total aktif: ${totalCount} tiket).`);
+      return {
+        success: true,
+        message: mode === 'use_data'
+          ? `Sinkronisasi berhasil. Data baru diterapkan di server (${addedCount} pembaruan), data yang sudah disampling & dikalibrasi aman terjaga.`
+          : `Penambahan data berhasil. ${addedCount} tiket baru ditambahkan tanpa duplikasi, total aktif: ${totalCount} tiket.`,
+        count: totalCount,
+      };
     } catch (err: any) {
       const errorMsg = err?.message || 'Terjadi kesalahan jaringan saat sinkronisasi.';
       setSheetConfig((prev) => ({

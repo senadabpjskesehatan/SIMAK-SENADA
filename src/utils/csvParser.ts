@@ -305,26 +305,19 @@ export function rowsToTickets(
       item.nomorTiket = `TKT-${new Date().getFullYear()}-${padNum}`;
     }
 
-    // If row has any useful data, keep it!
-    const hasAnyContent = (item.isiKeluhan && item.isiKeluhan.length > 0) ||
-                          (item.isiJawaban && item.isiJawaban.length > 0) ||
-                          (item.pokokMasalah && item.pokokMasalah.length > 0) ||
-                          (item.namaPetugas && item.namaPetugas.length > 0);
-
-    if (hasAnyContent) {
-      tickets.push({
-        nomorTiket: item.nomorTiket,
-        tanggalTiket: item.tanggalTiket || new Date().toISOString().slice(0, 10),
-        kategori: cleanCategory(item.kategori || 'Informasi'),
-        pokokMasalah: item.pokokMasalah || 'Pelayanan Faskes',
-        topikMasalah: item.topikMasalah || 'Layanan Umum',
-        isiKeluhan: item.isiKeluhan || 'Pertanyaan/keluhan peserta belum terisi lengkap dalam baris spreadsheet.',
-        isiJawaban: item.isiJawaban || 'Petugas telah memberikan respons penyelesaian terkait kendala peserta.',
-        rating: item.rating ?? 5,
-        namaPetugas: item.namaPetugas || 'Petugas Layanan',
-        sampled: false,
-      });
-    }
+    // Accept all rows that have data or default generated nomorTiket
+    tickets.push({
+      nomorTiket: item.nomorTiket,
+      tanggalTiket: item.tanggalTiket || new Date().toISOString().slice(0, 10),
+      kategori: cleanCategory(item.kategori || 'Informasi'),
+      pokokMasalah: item.pokokMasalah || 'Pelayanan Faskes',
+      topikMasalah: item.topikMasalah || 'Layanan Umum',
+      isiKeluhan: item.isiKeluhan || 'Pertanyaan/keluhan peserta belum terisi lengkap dalam baris spreadsheet.',
+      isiJawaban: item.isiJawaban || 'Petugas telah memberikan respons penyelesaian terkait kendala peserta.',
+      rating: item.rating ?? 5,
+      namaPetugas: item.namaPetugas || 'Petugas Layanan',
+      sampled: false,
+    });
   }
 
   return {
@@ -376,20 +369,18 @@ export function objectsToTickets(
     ).trim();
     const kategori = cleanCategory(mapped.kategori || item.jenis || '');
 
-    if (isiKeluhan || isiJawaban || mapped.pokokMasalah || mapped.namaPetugas || mapped.nomorTiket) {
-      tickets.push({
-        nomorTiket,
-        tanggalTiket: normalizeDate(mapped.tanggalTiket || item.tanggal || item.tgl),
-        kategori,
-        pokokMasalah: String(mapped.pokokMasalah || item.masalah || 'Pelayanan Faskes').trim(),
-        topikMasalah: String(mapped.topikMasalah || item.topik || 'Layanan Umum').trim(),
-        isiKeluhan: isiKeluhan || 'Pertanyaan/keluhan peserta tercatat dalam webservice.',
-        isiJawaban: isiJawaban || 'Petugas telah memberikan respons penyelesaian kendala peserta.',
-        rating: normalizeRating(mapped.rating ?? item.rating ?? item.skor),
-        namaPetugas: namaPetugas || 'Petugas Layanan',
-        sampled: false,
-      });
-    }
+    tickets.push({
+      nomorTiket,
+      tanggalTiket: normalizeDate(mapped.tanggalTiket || item.tanggal || item.tgl),
+      kategori,
+      pokokMasalah: String(mapped.pokokMasalah || item.masalah || 'Pelayanan Faskes').trim(),
+      topikMasalah: String(mapped.topikMasalah || item.topik || 'Layanan Umum').trim(),
+      isiKeluhan: isiKeluhan || 'Pertanyaan/keluhan peserta tercatat dalam webservice.',
+      isiJawaban: isiJawaban || 'Petugas telah memberikan respons penyelesaian kendala peserta.',
+      rating: normalizeRating(mapped.rating ?? item.rating ?? item.skor),
+      namaPetugas: namaPetugas || 'Petugas Layanan',
+      sampled: false,
+    });
   }
 
   return {
