@@ -27,8 +27,8 @@ function MainContent() {
   React.useEffect(() => {
     if (!currentUser) return;
     const roleAllowedTabs: Record<UserRole, string[]> = {
-      admin: ['dashboard', 'kalibrasi', 'users-management'],
-      pusat: ['dashboard', 'kalibrasi'],
+      admin: ['dashboard', 'sampling', 'inbox-petugas', 'inbox-sanggah-qa', 'history', 'kalibrasi', 'indicators', 'google-sheet', 'users-management'],
+      pusat: ['dashboard', 'kalibrasi', 'indicators', 'history'],
       team_leader: ['dashboard', 'inbox-petugas', 'history'],
       petugas: ['dashboard', 'inbox-petugas', 'history'],
       qa: ['dashboard', 'sampling', 'inbox-sanggah-qa', 'history', 'kalibrasi', 'indicators', 'google-sheet'],

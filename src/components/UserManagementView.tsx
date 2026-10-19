@@ -39,8 +39,11 @@ export const UserManagementView: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
 
-  // Delete Confirmation Modal State
+  // Confirmation Modals State
   const [userToDelete, setUserToDelete] = useState<User | null>(null);
+  const [isConfirmingClearAll, setIsConfirmingClearAll] = useState(false);
+  const [isConfirmingResetUsers, setIsConfirmingResetUsers] = useState(false);
+  const [isDeletingLoading, setIsDeletingLoading] = useState(false);
 
   // Form State
   const [formData, setFormData] = useState<{
@@ -114,12 +117,15 @@ export const UserManagementView: React.FC = () => {
   const paginatedUsers = pageSize === -1 ? filteredUsers : filteredUsers.slice(startIndex, endIndex);
 
   const handleResetToInitialUsers = () => {
-    if (window.confirm('Muat ulang seluruh 92 pengguna dari data file sampling? Data pengguna default akan dipulihkan.')) {
-      resetUsersToDefault();
-      setCurrentPage(1);
-      setSuccessToast(`Berhasil memulihkan & menyinkronkan seluruh 92 pengguna dari file sampling.`);
-      setTimeout(() => setSuccessToast(null), 4500);
-    }
+    setIsConfirmingResetUsers(true);
+  };
+
+  const confirmResetUsers = async () => {
+    await resetUsersToDefault();
+    setCurrentPage(1);
+    setIsConfirmingResetUsers(false);
+    setSuccessToast(`Berhasil memulihkan & menyinkronkan seluruh 92 pengguna dari file sampling.`);
+    setTimeout(() => setSuccessToast(null), 4500);
   };
 
   const handleOpenCreate = () => {
@@ -156,7 +162,9 @@ export const UserManagementView: React.FC = () => {
 
   const handleDeleteClick = (user: User) => {
     if (currentUser && user.id === currentUser.id) {
-      alert('Anda tidak dapat menghapus akun yang sedang Anda gunakan saat ini.');
+      setSuccessToast(null);
+      setFormError('Anda tidak dapat menghapus akun Anda sendiri yang sedang aktif digunakan.');
+      setTimeout(() => setFormError(''), 4500);
       return;
     }
     setUserToDelete(user);
@@ -164,12 +172,15 @@ export const UserManagementView: React.FC = () => {
 
   const confirmDelete = async () => {
     if (!userToDelete) return;
+    setIsDeletingLoading(true);
     const result = await deleteUser(userToDelete.id);
+    setIsDeletingLoading(false);
     if (result.success) {
-      setSuccessToast(`User ${userToDelete.name} berhasil dihapus.`);
+      setSuccessToast(`Pengguna "${userToDelete.name}" (${userToDelete.username}) berhasil dihapus.`);
       setTimeout(() => setSuccessToast(null), 4000);
     } else {
       setFormError(result.error || 'Gagal menghapus pengguna.');
+      setTimeout(() => setFormError(''), 4000);
     }
     setUserToDelete(null);
   };
@@ -373,14 +384,9 @@ export const UserManagementView: React.FC = () => {
             </button>
 
             <button
-              onClick={() => {
-                if (window.confirm('Apakah Anda yakin ingin menghapus SEMUA data termasuk tiket, evaluasi, kalibrasi, dan pengguna? Tindakan ini tidak dapat dibatalkan.')) {
-                  clearAllData();
-                  setSuccessToast('Semua data berhasil dihapus.');
-                  setTimeout(() => setSuccessToast(null), 4000);
-                }
-              }}
+              onClick={() => setIsConfirmingClearAll(true)}
               className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg text-xs font-bold border border-rose-200 shadow-2xs flex items-center gap-1.5 transition"
+              title="Hapus seluruh data tiket, evaluasi, dan reset pengguna"
             >
               <Trash2 className="w-3.5 h-3.5" />
               <span>Hapus Semua Data</span>
@@ -890,6 +896,186 @@ export const UserManagementView: React.FC = () => {
                 </button>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Delete User Confirmation Modal */}
+      {userToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full border border-slate-200 overflow-hidden">
+            <div className="bg-rose-600 px-6 py-4 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Trash2 className="w-5 h-5 text-white" />
+                <h3 className="text-sm font-bold">Konfirmasi Hapus Pengguna</h3>
+              </div>
+              <button
+                onClick={() => setUserToDelete(null)}
+                className="p-1 rounded text-rose-200 hover:text-white transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <p className="text-xs text-slate-700 leading-relaxed">
+                Apakah Anda yakin ingin menghapus akun pengguna berikut dari sistem dan server Firestore?
+              </p>
+
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2 text-xs">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500 text-[11px]">Nama Pengguna:</span>
+                  <span className="font-bold text-slate-900">{userToDelete.name}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500 text-[11px]">Username / NPP:</span>
+                  <span className="font-mono font-semibold text-slate-800">
+                    {userToDelete.username} ({userToDelete.nip || '-'})
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500 text-[11px]">Hak Akses:</span>
+                  <span className="font-bold text-teal-800 uppercase text-[10px] bg-teal-50 px-2 py-0.5 rounded border border-teal-200">
+                    {userToDelete.role}
+                  </span>
+                </div>
+                {userToDelete.team && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-500 text-[11px]">Tim Penugasan:</span>
+                    <span className="font-semibold text-indigo-700">{userToDelete.team}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 text-[11px] leading-relaxed">
+                Peringatan: Akun pengguna ini akan segera dihapus permanen dari server. Pengguna tidak akan dapat masuk kembali ke sistem.
+              </div>
+
+              <div className="pt-3 border-t border-slate-200 flex items-center justify-end gap-2 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setUserToDelete(null)}
+                  disabled={isDeletingLoading}
+                  className="px-4 py-2 border border-slate-300 rounded-lg text-slate-700 font-semibold hover:bg-slate-50 disabled:opacity-50 transition"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmDelete}
+                  disabled={isDeletingLoading}
+                  className="px-4 py-2 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white rounded-lg font-bold shadow-xs flex items-center gap-1.5 transition"
+                >
+                  {isDeletingLoading ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      Menghapus...
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Ya, Hapus Pengguna
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Clear All Confirmation Modal */}
+      {isConfirmingClearAll && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full border border-slate-200 overflow-hidden">
+            <div className="bg-rose-700 px-6 py-4 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-5 h-5 text-white" />
+                <h3 className="text-sm font-bold">Hapus Semua Data Sistem</h3>
+              </div>
+              <button
+                onClick={() => setIsConfirmingClearAll(false)}
+                className="p-1 rounded text-rose-200 hover:text-white transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4 text-xs text-slate-700">
+              <p className="leading-relaxed">
+                Apakah Anda yakin ingin menghapus <strong>SEMUA DATA</strong> di aplikasi, termasuk data tiket, evaluasi sampling, kalibrasi mutu, dan riwayat pengguna?
+              </p>
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-[11px] leading-relaxed">
+                Tindakan ini akan mengosongkan seluruh dataset lokal dan server sehingga sistem kembali ke kondisi awal bersih tanpa data default.
+              </div>
+
+              <div className="pt-3 border-t border-slate-200 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsConfirmingClearAll(false)}
+                  className="px-4 py-2 border border-slate-300 rounded-lg text-slate-700 font-semibold hover:bg-slate-50 transition"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    clearAllData();
+                    setIsConfirmingClearAll(false);
+                    setSuccessToast('Semua data berhasil dibersihkan dari server.');
+                    setTimeout(() => setSuccessToast(null), 4000);
+                  }}
+                  className="px-4 py-2 bg-rose-700 hover:bg-rose-800 text-white rounded-lg font-bold shadow-xs flex items-center gap-1.5 transition"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Hapus Bersih Semua
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reset Users Confirmation Modal */}
+      {isConfirmingResetUsers && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full border border-slate-200 overflow-hidden">
+            <div className="bg-slate-900 px-6 py-4 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <RefreshCw className="w-4 h-4 text-teal-400" />
+                <h3 className="text-sm font-bold">Konfirmasi Reset Data Pengguna</h3>
+              </div>
+              <button
+                onClick={() => setIsConfirmingResetUsers(false)}
+                className="p-1 rounded text-slate-400 hover:text-white transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4 text-xs text-slate-700">
+              <p className="leading-relaxed">
+                Muat ulang seluruh <strong>92 pengguna</strong> dari data master file sampling? Akun default akan dipulihkan dan disinkronkan ke server Firestore.
+              </p>
+
+              <div className="pt-3 border-t border-slate-200 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsConfirmingResetUsers(false)}
+                  className="px-4 py-2 border border-slate-300 rounded-lg text-slate-700 font-semibold hover:bg-slate-50 transition"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmResetUsers}
+                  className="px-4 py-2 bg-teal-700 hover:bg-teal-800 text-white rounded-lg font-bold shadow-xs flex items-center gap-1.5 transition"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  Pulihkan Pengguna
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

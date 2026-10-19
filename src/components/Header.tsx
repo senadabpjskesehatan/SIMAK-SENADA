@@ -90,14 +90,14 @@ export const Header: React.FC<HeaderProps> = ({ onOpenLoginModal }) => {
       id: 'sampling',
       label: 'Sampling & Penilaian AI',
       icon: Scale,
-      roles: ['qa'], // Khusus QA
+      roles: ['admin', 'qa'],
       badge: null,
     },
     {
       id: 'inbox-petugas',
       label: 'Inbox Hasil Sampling',
       icon: Inbox,
-      roles: ['petugas', 'team_leader'], // Khusus Petugas dan Team Leader
+      roles: ['admin', 'petugas', 'team_leader'],
       badge: pendingPetugasCount > 0 ? pendingPetugasCount : null,
       badgeColor: 'bg-blue-600 text-white',
     },
@@ -105,7 +105,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenLoginModal }) => {
       id: 'inbox-sanggah-qa',
       label: 'Inbox Sanggah QA',
       icon: Bell,
-      roles: ['qa'], // Khusus QA
+      roles: ['admin', 'qa'],
       badge: pendingQaRebuttalCount > 0 ? pendingQaRebuttalCount : null,
       badgeColor: 'bg-amber-600 text-white',
     },
@@ -113,7 +113,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenLoginModal }) => {
       id: 'history',
       label: 'History & Nilai Akhir',
       icon: History,
-      roles: ['qa', 'team_leader', 'petugas'], // Khusus QA, Team Leader, dan Petugas
+      roles: ['admin', 'pusat', 'qa', 'team_leader', 'petugas'],
     },
     {
       id: 'kalibrasi',
@@ -125,19 +125,19 @@ export const Header: React.FC<HeaderProps> = ({ onOpenLoginModal }) => {
       id: 'indicators',
       label: 'Indikator & Bobot',
       icon: Sliders,
-      roles: ['qa'], // Khusus QA
+      roles: ['admin', 'qa', 'pusat'],
     },
     {
       id: 'google-sheet',
       label: 'Sinkron Excel & Google Sheet',
       icon: FileSpreadsheet,
-      roles: ['qa'], // Khusus QA
+      roles: ['admin', 'qa'],
     },
     {
       id: 'users-management',
       label: 'Manajemen User',
       icon: Users,
-      roles: ['admin'], // Khusus Admin
+      roles: ['admin'],
     },
   ];
 

@@ -133,7 +133,7 @@ interface AppContextType {
   updateMultipleIndicators: (updates: { id: string; bobot?: number; nama?: string; deskripsi?: string; nomorSOP?: number }[]) => Promise<{ success: boolean; error?: string }>;
   applyStandardSopWeights: () => Promise<{ success: boolean; error?: string }>;
   deleteIndicator: (id: string) => Promise<{ success: boolean; error?: string }> | void;
-  resetIndicators: () => void;
+  resetIndicators: () => Promise<{ success: boolean; error?: string }>;
   totalIndicatorWeight: number;
 
   // Tickets & Sheet Sync
@@ -419,8 +419,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       collection(db, 'indicators'),
       async (snapshot) => {
         const indList: Indicator[] = [];
-        snapshot.forEach((doc) => {
-          indList.push(doc.data() as Indicator);
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data();
+          indList.push({ id: docSnap.id, ...data } as Indicator);
         });
         if (indList.length > 0) {
           indList.sort((a, b) => {
@@ -985,8 +986,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       safeStorage.removeItem(STORAGE_KEYS.USER);
       setCurrentUser(targetUser);
       const roleAllowedTabs: Record<UserRole, string[]> = {
-        admin: ['dashboard', 'kalibrasi', 'users-management'],
-        pusat: ['dashboard', 'kalibrasi'],
+        admin: ['dashboard', 'sampling', 'inbox-petugas', 'inbox-sanggah-qa', 'history', 'kalibrasi', 'indicators', 'google-sheet', 'users-management'],
+        pusat: ['dashboard', 'kalibrasi', 'indicators', 'history'],
         team_leader: ['dashboard', 'inbox-petugas', 'history'],
         petugas: ['dashboard', 'inbox-petugas', 'history'],
         qa: ['dashboard', 'sampling', 'inbox-sanggah-qa', 'history', 'kalibrasi', 'indicators', 'google-sheet'],
@@ -1113,6 +1114,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const deleteIndicator = async (id: string): Promise<{ success: boolean; error?: string }> => {
+    if (!id) return { success: false, error: 'ID indikator tidak valid' };
+
     setIndicators((prev) => {
       const next = prev.filter((ind) => ind.id !== id);
       safeStorage.setItem(STORAGE_KEYS.INDICATORS, JSON.stringify(next));
@@ -1121,6 +1124,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     try {
       await deleteDoc(doc(db, 'indicators', id));
+      const q = query(collection(db, 'indicators'), where('id', '==', id));
+      const snap = await getDocs(q);
+      for (const d of snap.docs) {
+        if (d.id !== id) {
+          await deleteDoc(d.ref);
+        }
+      }
       return { success: true };
     } catch (e: any) {
       console.warn('Firestore deleteIndicator deferred:', e);
@@ -1128,7 +1138,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
-  const resetIndicators = async () => {
+  const resetIndicators = async (): Promise<{ success: boolean; error?: string }> => {
     setIndicators(INITIAL_INDICATORS);
     safeStorage.setItem(STORAGE_KEYS.INDICATORS, JSON.stringify(INITIAL_INDICATORS));
     try {
@@ -1142,8 +1152,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       for (const ind of INITIAL_INDICATORS) {
         await safeSetDoc(doc(db, 'indicators', ind.id), ind);
       }
-    } catch (e) {
+      return { success: true };
+    } catch (e: any) {
       console.warn('Reset indicators Firestore deferred:', e);
+      return { success: true };
     }
   };
 

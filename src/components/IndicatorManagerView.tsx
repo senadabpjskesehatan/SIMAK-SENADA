@@ -36,6 +36,7 @@ export const IndicatorManagerView: React.FC = () => {
   } = useApp();
 
   const [editingIndicator, setEditingIndicator] = useState<Indicator | null>(null);
+  const [indicatorToDelete, setIndicatorToDelete] = useState<Indicator | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [showQuickTable, setShowQuickTable] = useState(true);
 
@@ -187,14 +188,23 @@ export const IndicatorManagerView: React.FC = () => {
     showToast(`Indikator baru berhasil ditambahkan.`);
   };
 
-  const handleDelete = async (ind: Indicator) => {
+  const handleDelete = (ind: Indicator) => {
     if (indicators.length <= 1) {
-      alert('Minimal harus ada 1 indikator dalam sistem penilaian mutu.');
+      showToast('Minimal harus ada 1 indikator dalam sistem penilaian mutu.');
       return;
     }
-    if (confirm(`Apakah Anda yakin ingin menghapus indikator "${ind.nama}"?`)) {
-      await deleteIndicator(ind.id);
-      showToast(`Indikator "${ind.nama}" berhasil dihapus.`);
+    setIndicatorToDelete(ind);
+  };
+
+  const confirmDeleteIndicator = async () => {
+    if (!indicatorToDelete) return;
+    const target = indicatorToDelete;
+    setIndicatorToDelete(null);
+    const res = await deleteIndicator(target.id);
+    if (res && res.success === false) {
+      showToast(`Gagal menghapus: ${res.error || 'Terjadi kesalahan sistem'}`);
+    } else {
+      showToast(`Indikator "${target.nama}" berhasil dihapus.`);
     }
   };
 
@@ -251,14 +261,8 @@ export const IndicatorManagerView: React.FC = () => {
   };
 
   const handleResetToStandard = async () => {
-    if (
-      confirm(
-        'Reset seluruh indikator kembali ke standar baku SOP (11 Indikator Mutu dengan total bobot 100%)?'
-      )
-    ) {
-      await resetIndicators();
-      showToast('Indikator berhasil direset ke standar SOP resmi BPJS Kesehatan.');
-    }
+    await resetIndicators();
+    showToast('Indikator berhasil direset ke standar SOP resmi BPJS Kesehatan.');
   };
 
   const isWeightValid = totalIndicatorWeight === 100;
@@ -1065,6 +1069,73 @@ export const IndicatorManagerView: React.FC = () => {
           );
         })}
       </div>
+
+      {/* Delete Indicator Confirmation Modal */}
+      {indicatorToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full border border-slate-200 overflow-hidden">
+            <div className="bg-rose-600 px-6 py-4 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Trash2 className="w-5 h-5 text-white" />
+                <h3 className="text-sm font-bold">Konfirmasi Hapus Indikator Mutu</h3>
+              </div>
+              <button
+                onClick={() => setIndicatorToDelete(null)}
+                className="p-1 rounded text-rose-200 hover:text-white transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <p className="text-xs text-slate-700 leading-relaxed">
+                Apakah Anda yakin ingin menghapus indikator penilaian mutu berikut dari sistem dan server Firestore?
+              </p>
+
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2 text-xs">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500 text-[11px]">Nama Indikator:</span>
+                  <span className="font-bold text-slate-900">{indicatorToDelete.nama}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500 text-[11px]">No. SOP / ID:</span>
+                  <span className="font-mono font-semibold text-teal-800">
+                    SOP #{indicatorToDelete.nomorSOP ?? '-'} ({indicatorToDelete.id})
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500 text-[11px]">Bobot Nilai:</span>
+                  <span className="font-bold text-slate-900 bg-teal-50 px-2 py-0.5 rounded border border-teal-200">
+                    {indicatorToDelete.bobot}%
+                  </span>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 text-[11px] leading-relaxed">
+                Peringatan: Menghapus indikator akan mengubah total akumulasi bobot sistem. Pastikan untuk menyeimbangkan kembali total bobot ke 100%.
+              </div>
+
+              <div className="pt-3 border-t border-slate-200 flex items-center justify-end gap-2 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setIndicatorToDelete(null)}
+                  className="px-4 py-2 border border-slate-300 rounded-lg text-slate-700 font-semibold hover:bg-slate-50 transition"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmDeleteIndicator}
+                  className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-bold shadow-xs flex items-center gap-1.5 transition"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Ya, Hapus Indikator
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
