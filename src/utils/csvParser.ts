@@ -236,7 +236,7 @@ export async function rowsToTickets(
   sourceName = 'excel',
   onProgress?: (percent: number, stepText: string) => void
 ): Promise<{ data: Ticket[]; headers: string[]; rawCount: number }> {
-  if (!rows || rows.length < 2) {
+  if (!rows || rows.length === 0) {
     return { data: [], headers: [], rawCount: 0 };
   }
 
@@ -257,17 +257,17 @@ export async function rowsToTickets(
     }
   }
 
-  // If at least 1 key matched, use that row as header; otherwise fallback to row 0
-  const rawHeaders = (rows[headerRowIndex] || []).map((h) => String(h || '').trim());
+  // If no headers matched and rows.length === 1, treat row 0 as data
+  const useHeaderRow = maxMatchedKeys > 0 || rows.length > 1;
+  const rawHeaders = useHeaderRow ? (rows[headerRowIndex] || []).map((h) => String(h || '').trim()) : ['Nomor Tiket', 'Tanggal', 'Kategori', 'Pokok Masalah', 'Topik', 'Keluhan', 'Jawaban', 'Rating', 'Petugas'];
   const mappedKeys = rawHeaders.map(normalizeColumnKey);
 
   const tickets: Ticket[] = [];
-  const startRow = maxMatchedKeys > 0 ? headerRowIndex + 1 : 1;
+  const startRow = useHeaderRow && maxMatchedKeys > 0 ? headerRowIndex + 1 : 0;
 
   for (let r = startRow; r < rows.length; r++) {
-    // Yield to UI every 100 rows
-    if (r % 100 === 0) {
-        onProgress?.(85 + Math.round(((r - startRow) / (rows.length - startRow)) * 10), `Memproses baris ${r}/${rows.length}...`);
+    if (r % 100 === 0 && rows.length > startRow) {
+        onProgress?.(85 + Math.round(((r - startRow) / Math.max(1, rows.length - startRow)) * 10), `Memproses baris ${r}/${rows.length}...`);
         await new Promise(r => setTimeout(r, 0));
     }
     const row = rows[r];
@@ -304,14 +304,24 @@ export async function rowsToTickets(
       }
     });
 
-    // Fallback heuristic: If headers didn't match isiKeluhan / isiJawaban,
-    // find any long text strings in the row
+    // Fallback positional mapping if keys didn't match well or values are empty
+    if (!item.nomorTiket && row[0] !== undefined) item.nomorTiket = String(row[0]).trim();
+    if (!item.tanggalTiket && row[1] !== undefined) item.tanggalTiket = normalizeDate(row[1]);
+    if (!item.kategori && row[2] !== undefined) item.kategori = cleanCategory(row[2]);
+    if (!item.pokokMasalah && row[3] !== undefined) item.pokokMasalah = String(row[3]).trim();
+    if (!item.topikMasalah && row[4] !== undefined) item.topikMasalah = String(row[4]).trim();
+    if (!item.isiKeluhan && row[5] !== undefined) item.isiKeluhan = String(row[5]).trim();
+    if (!item.isiJawaban && row[6] !== undefined) item.isiJawaban = String(row[6]).trim();
+    if (!item.rating && row[7] !== undefined) item.rating = normalizeRating(row[7]);
+    if (!item.namaPetugas && row[8] !== undefined) item.namaPetugas = String(row[8]).trim();
+
+    // Fallback heuristic for text columns
     if (!item.isiKeluhan || !item.isiJawaban) {
       const textCols: string[] = [];
       row.forEach((cell, idx) => {
         const str = String(cell || '').trim();
         const k = mappedKeys[idx];
-        if (k !== 'nomorTiket' && k !== 'tanggalTiket' && k !== 'namaPetugas' && str.length > 15) {
+        if (str.length > 10) {
           textCols.push(str);
         }
       });
@@ -325,25 +335,44 @@ export async function rowsToTickets(
       item.nomorTiket = `TKT-${new Date().getFullYear()}-${padNum}`;
     }
 
-    // Accept all rows that have data or default generated nomorTiket
     tickets.push({
       nomorTiket: item.nomorTiket,
       tanggalTiket: item.tanggalTiket || new Date().toISOString().slice(0, 10),
       kategori: cleanCategory(item.kategori || 'Informasi'),
       pokokMasalah: item.pokokMasalah || 'Pelayanan Faskes',
       topikMasalah: item.topikMasalah || 'Layanan Umum',
-      isiKeluhan: item.isiKeluhan || 'Pertanyaan/keluhan peserta belum terisi lengkap dalam baris spreadsheet.',
-      isiJawaban: item.isiJawaban || 'Petugas telah memberikan respons penyelesaian terkait kendala peserta.',
+      isiKeluhan: item.isiKeluhan || 'Pertanyaan/keluhan peserta tercatat dalam baris spreadsheet.',
+      isiJawaban: item.isiJawaban || 'Petugas telah memberikan respons penyelesaian kendala peserta.',
       rating: item.rating ?? 5,
       namaPetugas: item.namaPetugas || 'Petugas Layanan',
       sampled: false,
     });
   }
 
+  // Absolute fallback: If still 0 tickets, parse every row as raw ticket
+  if (tickets.length === 0 && rows.length > 0) {
+    for (const row of rows) {
+      if (!row || !Array.isArray(row) || row.every(c => c === '' || c == null)) continue;
+      const padNum = String(tickets.length + 1).padStart(4, '0');
+      tickets.push({
+        nomorTiket: String(row[0] || `TKT-${new Date().getFullYear()}-${padNum}`).trim(),
+        tanggalTiket: normalizeDate(row[1]),
+        kategori: cleanCategory(row[2]),
+        pokokMasalah: String(row[3] || 'Pelayanan Faskes').trim(),
+        topikMasalah: String(row[4] || 'Layanan Umum').trim(),
+        isiKeluhan: String(row[5] || row[0] || 'Keluhan peserta').trim(),
+        isiJawaban: String(row[6] || 'Penanganan petugas').trim(),
+        rating: normalizeRating(row[7]),
+        namaPetugas: String(row[8] || 'Petugas Layanan').trim(),
+        sampled: false,
+      });
+    }
+  }
+
   return {
     data: tickets,
     headers: rawHeaders,
-    rawCount: rows.length - 1,
+    rawCount: Math.max(0, rows.length - startRow),
   };
 }
 

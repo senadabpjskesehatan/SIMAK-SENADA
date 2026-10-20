@@ -70,9 +70,13 @@ export const isQuotaError = (err: any): boolean => {
   const msg = err instanceof Error ? err.message : String(err);
   return (
     err?.code === 'resource-exhausted' ||
+    err?.code === 'unavailable' ||
     msg.includes('Quota limit exceeded') ||
     msg.includes('resource-exhausted') ||
-    msg.includes('Free daily write units')
+    msg.includes('Free daily write units') ||
+    msg.includes('Could not reach Cloud Firestore backend') ||
+    msg.includes('unavailable') ||
+    msg.includes('offline mode')
   );
 };
 
