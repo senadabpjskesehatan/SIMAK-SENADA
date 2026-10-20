@@ -231,10 +231,11 @@ export function cleanCategory(val: any): string {
 /**
  * Converts 2D array of rows (first row is headers) into structured Ticket list
  */
-export function rowsToTickets(
+export async function rowsToTickets(
   rows: any[][],
-  sourceName = 'excel'
-): { data: Ticket[]; headers: string[]; rawCount: number } {
+  sourceName = 'excel',
+  onProgress?: (percent: number, stepText: string) => void
+): Promise<{ data: Ticket[]; headers: string[]; rawCount: number }> {
   if (!rows || rows.length < 2) {
     return { data: [], headers: [], rawCount: 0 };
   }
@@ -264,6 +265,11 @@ export function rowsToTickets(
   const startRow = maxMatchedKeys > 0 ? headerRowIndex + 1 : 1;
 
   for (let r = startRow; r < rows.length; r++) {
+    // Yield to UI every 100 rows
+    if (r % 100 === 0) {
+        onProgress?.(85 + Math.round(((r - startRow) / (rows.length - startRow)) * 10), `Memproses baris ${r}/${rows.length}...`);
+        await new Promise(r => setTimeout(r, 0));
+    }
     const row = rows[r];
     if (!row || !Array.isArray(row) || row.every((c) => c === '' || c === undefined || c === null)) {
       continue;
@@ -407,7 +413,7 @@ export function objectsToTickets(
 /**
  * Parses Google Visualization (GViz) JSON responses (e.g., google.visualization.Query.setResponse)
  */
-export function parseGVizResponse(text: string): { data: Ticket[]; headers: string[]; rawCount: number } {
+export async function parseGVizResponse(text: string): Promise<{ data: Ticket[]; headers: string[]; rawCount: number }> {
   try {
     const start = text.indexOf('{');
     const end = text.lastIndexOf('}');
@@ -425,7 +431,7 @@ export function parseGVizResponse(text: string): { data: Ticket[]; headers: stri
       const rowCells = (r?.c || []).map((cell: any) => cell?.f ?? cell?.v ?? '');
       rows.push(rowCells);
     }
-    return rowsToTickets(rows, 'gviz');
+    return await rowsToTickets(rows, 'gviz');
   } catch (e) {
     console.warn('GViz parse error:', e);
     return { data: [], headers: [], rawCount: 0 };
@@ -439,7 +445,7 @@ export function parseGVizResponse(text: string): { data: Ticket[]; headers: stri
  * - CSV with quotes, escaped quotes, newlines, and auto-detected delimiter
  * - SheetJS XLSX/CSV fallbacks
  */
-export function parseCSV(csvText: string): { data: Ticket[]; headers: string[]; rawCount: number } {
+export async function parseCSV(csvText: string): Promise<{ data: Ticket[]; headers: string[]; rawCount: number }> {
   if (!csvText || typeof csvText !== 'string' || !csvText.trim()) {
     return { data: [], headers: [], rawCount: 0 };
   }
@@ -448,7 +454,7 @@ export function parseCSV(csvText: string): { data: Ticket[]; headers: string[]; 
 
   // 1. Check for Google Visualization JSON format
   if (trimmed.includes('google.visualization') || trimmed.startsWith('/*O_o*/')) {
-    const gvizRes = parseGVizResponse(trimmed);
+    const gvizRes = await parseGVizResponse(trimmed);
     if (gvizRes.data.length > 0) {
       return gvizRes;
     }
@@ -466,7 +472,7 @@ export function parseCSV(csvText: string): { data: Ticket[]; headers: string[]; 
           if (res.data.length > 0) return res;
         } else if (Array.isArray(parsedJson[0])) {
           // 2D Array: [['Nomor Tiket', ...], ['T-01', ...]]
-          const res = rowsToTickets(parsedJson, 'json-2d');
+          const res = await rowsToTickets(parsedJson, 'json-2d');
           if (res.data.length > 0) return res;
         }
       }
@@ -489,7 +495,7 @@ export function parseCSV(csvText: string): { data: Ticket[]; headers: string[]; 
               const res = objectsToTickets(arr);
               if (res.data.length > 0) return res;
             } else if (Array.isArray(arr[0])) {
-              const res = rowsToTickets(arr, 'json-wrapper-2d');
+              const res = await rowsToTickets(arr, 'json-wrapper-2d');
               if (res.data.length > 0) return res;
             }
           }
@@ -547,7 +553,7 @@ export function parseCSV(csvText: string): { data: Ticket[]; headers: string[]; 
 
     let fastResult: { data: Ticket[]; headers: string[]; rawCount: number } | null = null;
     if (rows.length >= 2) {
-      fastResult = rowsToTickets(rows, 'fast-csv');
+      fastResult = await rowsToTickets(rows, 'fast-csv');
     }
 
     // 4. Also run SheetJS (XLSX) to ensure RFC 4180 multiline cells and complex CSVs are fully captured
@@ -559,7 +565,7 @@ export function parseCSV(csvText: string): { data: Ticket[]; headers: string[]; 
         const sheet = workbook.Sheets[sheetName];
         const sheetRows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
         if (sheetRows && sheetRows.length >= 2) {
-          xlsxResult = rowsToTickets(sheetRows, 'xlsx-csv');
+          xlsxResult = await rowsToTickets(sheetRows, 'xlsx-csv');
         }
       }
     } catch (xlsxErr) {
@@ -585,7 +591,7 @@ export function parseCSV(csvText: string): { data: Ticket[]; headers: string[]; 
         const sheet = workbook.Sheets[sheetName];
         const sheetRows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
         if (sheetRows && sheetRows.length >= 2) {
-          return rowsToTickets(sheetRows, 'xlsx-fallback');
+          return await rowsToTickets(sheetRows, 'xlsx-fallback');
         }
       }
     } catch {}
@@ -632,7 +638,7 @@ export async function parseExcelFile(
   onProgress?.(85, 'Memetakan 9 kolom standar & menstandarisasi data tiket...');
   await new Promise((r) => setTimeout(r, 60));
 
-  const result = rowsToTickets(rows, file.name);
+  const result = await rowsToTickets(rows, file.name, (p, t) => onProgress?.(p, t));
 
   onProgress?.(100, `Berhasil memproses ${result.data.length} tiket.`);
   return result;

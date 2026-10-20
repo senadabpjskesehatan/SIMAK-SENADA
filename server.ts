@@ -16,6 +16,7 @@ import {
   saveServerDb,
   ServerDatabase,
 } from './src/serverDb';
+import { INITIAL_USERS } from './src/data/mockData';
 
 dotenv.config();
 
@@ -595,6 +596,31 @@ app.post('/api/data/evaluation', (req, res) => {
   } catch (err: any) {
     console.error('Error save-evaluation in server:', err);
     res.status(500).json({ success: false, error: err?.message || 'Gagal menyimpan evaluasi di server' });
+  }
+});
+
+// 5. POST Fix Users (Sync missing users)
+app.post('/api/data/fix-users', (req, res) => {
+  try {
+    const db = getServerDb();
+    const existingUsernames = new Set(db.users.map(u => u.username.toLowerCase()));
+    const newUsers = [...db.users];
+    let added = false;
+    for (const u of INITIAL_USERS) {
+      if (!existingUsernames.has(u.username.toLowerCase())) {
+        newUsers.push(u);
+        added = true;
+      }
+    }
+    if (added) {
+      db.users = newUsers;
+      saveServerDb(db);
+      broadcastDbUpdate(db);
+    }
+    res.json({ success: true, message: added ? 'Users synchronized' : 'No changes' });
+  } catch (err: any) {
+    console.error('Error fix-users in server:', err);
+    res.status(500).json({ success: false, error: err?.message || 'Gagal memperbaiki user' });
   }
 });
 

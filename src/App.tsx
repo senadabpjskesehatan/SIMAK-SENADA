@@ -20,7 +20,7 @@ import { LoginView } from './components/LoginView';
 import { UserRole } from './types';
 
 function MainContent() {
-  const { activeTab, setActiveTab, currentUser } = useApp();
+  const { activeTab, setActiveTab, currentUser, firestoreQuotaExceeded } = useApp();
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
 
   // Guard: if current tab is not allowed for current role, default to dashboard
@@ -48,6 +48,28 @@ function MainContent() {
     <div className="min-h-screen flex flex-col bg-slate-50/70 text-slate-900">
       {/* Top Header */}
       <Header onOpenLoginModal={() => setIsLoginModalOpen(true)} />
+
+      {/* Quota Exceeded Notification Banner */}
+      {firestoreQuotaExceeded && (
+        <div className="bg-amber-50 border-b border-amber-200 px-4 py-2.5 text-xs text-amber-900 shadow-2xs">
+          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="inline-block w-2 h-2 rounded-full bg-amber-500 animate-pulse shrink-0"></span>
+              <span>
+                <strong>Mode Server Database Aktif:</strong> Kuota harian tulis Firestore Free Tier tercapai untuk hari ini. Seluruh data, tiket, dan evaluasi tetap tersimpan aman di Database Server (data/senada_db.json) dan tersinkronisasi realtime di semua perangkat & IP.
+              </span>
+            </div>
+            <a
+              href="https://console.firebase.google.com/project/flowing-shard-pn96h/firestore/databases/ai-studio-remixsenadasampl-2bb89593-d342-4e45-8e38-3c2dd8d7dac6/data?openUpgradeDialog=true"
+              target="_blank"
+              rel="noreferrer"
+              className="text-teal-700 underline font-semibold shrink-0 hover:text-teal-900"
+            >
+              Lihat Kuota / Upgrade Firebase
+            </a>
+          </div>
+        </div>
+      )}
 
       {/* Main View Area */}
       <main className="flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">

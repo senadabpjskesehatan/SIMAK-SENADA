@@ -375,6 +375,19 @@ export const UserManagementView: React.FC = () => {
             </button>
 
             <button
+                onClick={async () => {
+                  const res = await fetch('/api/data/fix-users', { method: 'POST' });
+                  const data = await res.json();
+                  if (data.success) setSuccessToast(data.message);
+                }}
+                className="px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-xs font-bold border border-emerald-200 shadow-2xs flex items-center gap-1.5 transition"
+                title="Sinkronkan user yang hilang"
+              >
+                <UserCheck className="w-3.5 h-3.5" />
+                <span>Fix Users</span>
+              </button>
+
+            <button
               onClick={handleResetToInitialUsers}
               className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold border border-slate-300 shadow-2xs flex items-center gap-1.5 transition"
               title="Sinkronkan atau pulihkan seluruh pengguna dari data master"

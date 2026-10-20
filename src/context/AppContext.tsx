@@ -54,16 +54,47 @@ const cleanFirestoreData = (obj: any): any => {
   return cleaned;
 };
 
+// Quota detection & graceful fallback to local server database (data/senada_db.json)
+let firestoreQuotaExceededGlobal = false;
+const quotaListeners = new Set<(exceeded: boolean) => void>();
+
+export const notifyQuotaExceeded = () => {
+  if (!firestoreQuotaExceededGlobal) {
+    firestoreQuotaExceededGlobal = true;
+    quotaListeners.forEach((l) => l(true));
+  }
+};
+
+export const isQuotaError = (err: any): boolean => {
+  if (!err) return false;
+  const msg = err instanceof Error ? err.message : String(err);
+  return (
+    err?.code === 'resource-exhausted' ||
+    msg.includes('Quota limit exceeded') ||
+    msg.includes('resource-exhausted') ||
+    msg.includes('Free daily write units')
+  );
+};
+
 const handleFirestoreError = (error: unknown, operationType: string, path: string | null) => {
+  if (isQuotaError(error)) {
+    notifyQuotaExceeded();
+    return;
+  }
   const errMessage = error instanceof Error ? error.message : String(error);
   console.warn(`[Firestore ${operationType} - ${path || 'general'}]:`, errMessage);
 };
 
 const safeSetDoc = async (docRef: any, data: any, options?: any) => {
+  if (firestoreQuotaExceededGlobal) return;
   try {
     const cleaned = cleanFirestoreData(data);
     await setDoc(docRef, cleaned, options);
-  } catch (err) {
+  } catch (err: any) {
+    if (isQuotaError(err)) {
+      notifyQuotaExceeded();
+      return;
+    }
     handleFirestoreError(err, 'safeSetDoc', docRef?.path || null);
   }
 };
@@ -74,9 +105,10 @@ export const toSafeDocId = (rawId: string): string => {
 };
 
 const batchSetDocs = async (items: { path: string; id: string; data: any }[]) => {
-  if (!items || items.length === 0) return;
+  if (firestoreQuotaExceededGlobal || !items || items.length === 0) return;
   const CHUNK_SIZE = 400;
   for (let i = 0; i < items.length; i += CHUNK_SIZE) {
+    if (firestoreQuotaExceededGlobal) break;
     const chunk = items.slice(i, i + CHUNK_SIZE);
     try {
       const batch = writeBatch(db);
@@ -86,9 +118,14 @@ const batchSetDocs = async (items: { path: string; id: string; data: any }[]) =>
         batch.set(ref, cleanFirestoreData(item.data));
       }
       await batch.commit();
-    } catch (err) {
+    } catch (err: any) {
+      if (isQuotaError(err)) {
+        notifyQuotaExceeded();
+        break;
+      }
       handleFirestoreError(err, 'batchSetDocs', `${items[0]?.path || 'general'} chunk`);
       for (const item of chunk) {
+        if (firestoreQuotaExceededGlobal) break;
         const safeId = toSafeDocId(item.id);
         await safeSetDoc(doc(db, item.path, safeId), item.data);
       }
@@ -97,9 +134,10 @@ const batchSetDocs = async (items: { path: string; id: string; data: any }[]) =>
 };
 
 const batchDeleteDocs = async (docRefs: any[]) => {
-  if (!docRefs || docRefs.length === 0) return;
+  if (firestoreQuotaExceededGlobal || !docRefs || docRefs.length === 0) return;
   const CHUNK_SIZE = 400;
   for (let i = 0; i < docRefs.length; i += CHUNK_SIZE) {
+    if (firestoreQuotaExceededGlobal) break;
     const chunk = docRefs.slice(i, i + CHUNK_SIZE);
     try {
       const batch = writeBatch(db);
@@ -107,9 +145,14 @@ const batchDeleteDocs = async (docRefs: any[]) => {
         batch.delete(ref);
       }
       await batch.commit();
-    } catch (err) {
+    } catch (err: any) {
+      if (isQuotaError(err)) {
+        notifyQuotaExceeded();
+        break;
+      }
       handleFirestoreError(err, 'batchDeleteDocs', 'chunk');
       for (const ref of chunk) {
+        if (firestoreQuotaExceededGlobal) break;
         try {
           await deleteDoc(ref);
         } catch {
@@ -223,6 +266,9 @@ interface AppContextType {
   // Active view
   activeTab: string;
   setActiveTab: (tab: string) => void;
+
+  // Firebase Quota & Status
+  firestoreQuotaExceeded: boolean;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -332,6 +378,17 @@ safeStorage.removeItem('senada_user_session_v10');
 safeStorage.removeItem('senada_user_v10_nodata');
 
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  // Firestore Quota tracker
+  const [firestoreQuotaExceeded, setFirestoreQuotaExceeded] = useState(firestoreQuotaExceededGlobal);
+
+  useEffect(() => {
+    const listener = (val: boolean) => setFirestoreQuotaExceeded(val);
+    quotaListeners.add(listener);
+    return () => {
+      quotaListeners.delete(listener);
+    };
+  }, []);
+
   // Session expired notification state
   const [sessionExpiredMessage, setSessionExpiredMessage] = useState<string | null>(null);
   const [sessionExpiresAt, setSessionExpiresAt] = useState<number | null>(() => {
@@ -391,12 +448,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           setUsers(usersList);
           safeStorage.setItem(STORAGE_KEYS.USERS_LIST, JSON.stringify(usersList));
         } else {
-          const batchItems = INITIAL_USERS.map((u) => ({
-            path: 'users',
-            id: u.id,
-            data: u,
-          }));
-          await batchSetDocs(batchItems);
+          if (!firestoreQuotaExceededGlobal) {
+            const batchItems = INITIAL_USERS.map((u) => ({
+              path: 'users',
+              id: u.id,
+              data: u,
+            }));
+            await batchSetDocs(batchItems);
+          }
           setUsers(INITIAL_USERS);
         }
       },
@@ -464,17 +523,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             });
             setIndicators(updatedList);
             safeStorage.setItem(STORAGE_KEYS.INDICATORS, JSON.stringify(updatedList));
-            // Sinkronkan pembaruan bobot resmi ke server Firestore
-            for (const ind of updatedList) {
-              await safeSetDoc(doc(db, 'indicators', ind.id), { bobot: ind.bobot, nomorSOP: ind.nomorSOP }, { merge: true });
+            // Sinkronkan pembaruan bobot resmi ke server Firestore jika kuota tersedia
+            if (!firestoreQuotaExceededGlobal) {
+              for (const ind of updatedList) {
+                await safeSetDoc(doc(db, 'indicators', ind.id), { bobot: ind.bobot, nomorSOP: ind.nomorSOP }, { merge: true });
+              }
             }
           } else {
             setIndicators(indList);
             safeStorage.setItem(STORAGE_KEYS.INDICATORS, JSON.stringify(indList));
           }
         } else {
-          for (const ind of INITIAL_INDICATORS) {
-            await safeSetDoc(doc(db, 'indicators', ind.id), ind);
+          if (!firestoreQuotaExceededGlobal) {
+            for (const ind of INITIAL_INDICATORS) {
+              await safeSetDoc(doc(db, 'indicators', ind.id), ind);
+            }
           }
           setIndicators(INITIAL_INDICATORS);
           safeStorage.setItem(STORAGE_KEYS.INDICATORS, JSON.stringify(INITIAL_INDICATORS));
@@ -1501,119 +1564,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
       onProgress?.(65, 'Menganalisis baris data & memetakan kolom standar tanpa gap...');
 
-      const parsed = parseCSV(rawData);
+      const parsed = await parseCSV(rawData);
       if (parsed.data.length === 0) {
         throw new Error(
           'Tidak ada baris data tiket valid yang dapat diimpor dari tautan tersebut. Pastikan berkas memiliki header kolom atau data tiket.'
         );
       }
 
-      onProgress?.(85, `Memproses ${parsed.data.length} tiket dan memeriksa status sampling/kalibrasi...`);
+      onProgress?.(85, `Menyinkronkan ${parsed.data.length} tiket ke database server & realtime stream...`);
 
-      // Fetch latest existing tickets from Firestore server
-      let existingTickets: Ticket[] = tickets;
-      try {
-        const snap = await getDocs(collection(db, 'tickets'));
-        const remoteList: Ticket[] = [];
-        snap.forEach((d) => remoteList.push(d.data() as Ticket));
-        if (remoteList.length > 0) existingTickets = remoteList;
-      } catch {
-        // use state tickets
-      }
-
-      let addedCount = 0;
-      let totalCount = 0;
-      const itemsToSet: { path: string; id: string; data: Ticket }[] = [];
-
-      if (mode === 'use_data') {
-        // "Gunakan Data": Replace unsampled tickets on server, but KEEP sampled & calibrated tickets intact
-        const sampledTicketIds = new Set([
-          ...evaluations.map((e) => e.nomorTiket),
-          ...calibrations.map((c) => c.nomorTiket),
-          ...existingTickets.filter((t) => t.sampled).map((t) => t.nomorTiket),
-        ]);
-
-        // 1. Delete old unsampled tickets from Firestore so new data truly replaces them on server
-        const oldUnsampledDocsToDelete = existingTickets
-          .filter((t) => !sampledTicketIds.has(t.nomorTiket) && !t.sampled)
-          .map((t) => doc(db, 'tickets', toSafeDocId(t.nomorTiket)));
-
-        if (oldUnsampledDocsToDelete.length > 0) {
-          await batchDeleteDocs(oldUnsampledDocsToDelete);
-        }
-
-        const existingMap = new Map(existingTickets.map((t) => [t.nomorTiket, t]));
-        const newMap = new Map<string, Ticket>();
-
-        // 2. Keep sampled / calibrated tickets from server
-        for (const [id, t] of existingMap.entries()) {
-          if (sampledTicketIds.has(id) || t.sampled) {
-            newMap.set(id, t);
-          }
-        }
-
-        // 3. Add or update unsampled tickets from parsed sheet data
-        for (const newT of parsed.data) {
-          const id = newT.nomorTiket;
-          if (newMap.has(id)) {
-            continue; // already sampled, preserve it
-          }
-          const normalized: Ticket = {
-            ...newT,
-            kategori: cleanCategory(newT.kategori),
-            sampled: false,
-          };
-          newMap.set(id, normalized);
-          addedCount++;
-          itemsToSet.push({ path: 'tickets', id, data: normalized });
-        }
-
-        if (itemsToSet.length > 0) {
-          await batchSetDocs(itemsToSet);
-        }
-
-        const finalTickets = Array.from(newMap.values());
-        totalCount = finalTickets.length;
-        setTickets(finalTickets);
-        safeStorage.setItem(STORAGE_KEYS.TICKETS, JSON.stringify(finalTickets));
-      } else {
-        // "Tambah Data": Append new tickets without duplication based on nomorTiket and tanggalTiket
-        const existingKeys = new Set(
-          existingTickets.map((t) => `${t.nomorTiket.trim().toLowerCase()}_${t.tanggalTiket}`.trim())
-        );
-        const existingIds = new Set(existingTickets.map((t) => t.nomorTiket.trim().toLowerCase()));
-
-        const newMap = new Map(existingTickets.map((t) => [t.nomorTiket, t]));
-
-        for (const newT of parsed.data) {
-          const key = `${newT.nomorTiket.trim().toLowerCase()}_${newT.tanggalTiket}`.trim();
-          const id = newT.nomorTiket.trim().toLowerCase();
-
-          if (!existingKeys.has(key) && !existingIds.has(id)) {
-            addedCount++;
-            const normalized: Ticket = {
-              ...newT,
-              kategori: cleanCategory(newT.kategori),
-              sampled: false,
-            };
-            newMap.set(newT.nomorTiket, normalized);
-            itemsToSet.push({ path: 'tickets', id: newT.nomorTiket, data: normalized });
-            existingKeys.add(key);
-            existingIds.add(id);
-          }
-        }
-
-        if (itemsToSet.length > 0) {
-          await batchSetDocs(itemsToSet);
-        }
-
-        const finalTickets = Array.from(newMap.values());
-        totalCount = finalTickets.length;
-        setTickets(finalTickets);
-        safeStorage.setItem(STORAGE_KEYS.TICKETS, JSON.stringify(finalTickets));
-      }
-
-      // Persist directly to server backend database & broadcast to all connected devices/IPs
+      // 1. Primary Sync: Persist directly to server backend database & broadcast to all connected devices/IPs
+      let addedCount = parsed.data.length;
+      let totalCount = parsed.data.length;
       try {
         const serverSyncRes = await callServerApi('/sync-tickets', 'POST', {
           tickets: parsed.data,
@@ -1629,6 +1591,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         console.warn('Server sync error fallback:', srvErr);
       }
 
+      onProgress?.(95, 'Memperbarui konfigurasi sheet & sinkronisasi status...');
+
       const now = new Date().toISOString().replace('T', ' ').slice(0, 16);
       const newConfig = {
         url: targetUrl,
@@ -1638,8 +1602,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         status: 'success' as const,
       };
       setSheetConfig(newConfig);
-      await safeSetDoc(doc(db, 'config', 'sheetConfig'), newConfig);
       safeStorage.setItem(STORAGE_KEYS.SHEET, JSON.stringify(newConfig));
+      safeSetDoc(doc(db, 'config', 'sheetConfig'), newConfig);
 
       onProgress?.(100, `Sinkronisasi selesai! ${addedCount} data baru diproses (Total aktif: ${totalCount} tiket).`);
       return {
@@ -1672,29 +1636,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         throw new Error('Tidak ditemukan data baris tiket yang valid dalam berkas Excel ini.');
       }
 
-      onProgress?.(90, `Menyimpan ${parsed.data.length} tiket secara batch...`);
+      onProgress?.(90, `Menyimpan ${parsed.data.length} tiket ke server database & stream realtime...`);
 
-      let addedCount = 0;
-      let totalCount = 0;
-      const existingMap = new Map(tickets.map((t) => [t.nomorTiket, t]));
-      const itemsToSet: { path: string; id: string; data: Ticket }[] = [];
-
-      for (const newT of parsed.data) {
-        if (!existingMap.has(newT.nomorTiket)) {
-          existingMap.set(newT.nomorTiket, newT);
-          addedCount++;
-          itemsToSet.push({ path: 'tickets', id: newT.nomorTiket, data: newT });
-        }
-      }
-
-      if (itemsToSet.length > 0) {
-        await batchSetDocs(itemsToSet);
-      }
-
-      totalCount = existingMap.size;
-      const finalTickets = Array.from(existingMap.values());
-      setTickets(finalTickets);
-      safeStorage.setItem(STORAGE_KEYS.TICKETS, JSON.stringify(finalTickets));
+      let addedCount = parsed.data.length;
+      let totalCount = parsed.data.length;
 
       // Persist directly to server backend database & broadcast to all connected devices/IPs
       try {
@@ -1705,6 +1650,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         });
         if (serverSyncRes && serverSyncRes.success && serverSyncRes.db) {
           applyServerDb(serverSyncRes.db);
+          if (typeof serverSyncRes.addedCount === 'number') addedCount = serverSyncRes.addedCount;
+          if (typeof serverSyncRes.totalCount === 'number') totalCount = serverSyncRes.totalCount;
         }
       } catch (srvErr) {
         console.warn('Server sync error fallback:', srvErr);
@@ -1719,7 +1666,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         status: 'success' as const,
       };
       setSheetConfig(newConfig);
-      await safeSetDoc(doc(db, 'config', 'sheetConfig'), newConfig);
+      safeStorage.setItem(STORAGE_KEYS.SHEET, JSON.stringify(newConfig));
+      safeSetDoc(doc(db, 'config', 'sheetConfig'), newConfig);
 
       onProgress?.(100, `Impor selesai! ${addedCount} data baru ditambahkan (Total: ${totalCount} tiket).`);
 
@@ -1745,41 +1693,36 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     onProgress?.(25, 'Menyiapkan dataset simulasi BPJS Kesehatan...');
 
     const sampleCSV = generateSampleGoogleSheetCSV();
-    const parsed = parseCSV(sampleCSV);
+    const parsed = await parseCSV(sampleCSV);
 
-    onProgress?.(70, 'Memuat tiket secara batch...');
+    onProgress?.(70, 'Memuat tiket ke database server...');
 
-    const existingMap = new Map(tickets.map((t) => [t.nomorTiket, t]));
-    const itemsToSet: { path: string; id: string; data: Ticket }[] = [];
-
-    for (const t of parsed.data) {
-      if (!existingMap.has(t.nomorTiket)) {
-        existingMap.set(t.nomorTiket, t);
-        itemsToSet.push({ path: 'tickets', id: t.nomorTiket, data: t });
+    let totalCount = parsed.data.length;
+    try {
+      const serverSyncRes = await callServerApi('/sync-tickets', 'POST', {
+        tickets: parsed.data,
+        mode: 'use_data',
+        sheetUrl: 'Simulasi Dataset Resmi BPJS',
+      });
+      if (serverSyncRes && serverSyncRes.success && serverSyncRes.db) {
+        applyServerDb(serverSyncRes.db);
+        if (typeof serverSyncRes.totalCount === 'number') totalCount = serverSyncRes.totalCount;
       }
+    } catch (srvErr) {
+      console.warn('Server sync error fallback:', srvErr);
     }
-
-    if (itemsToSet.length > 0) {
-      await batchSetDocs(itemsToSet);
-    }
-    setTickets(Array.from(existingMap.values()));
-
-    callServerApi('/sync-tickets', 'POST', {
-      tickets: parsed.data,
-      mode: 'use_data',
-      sheetUrl: 'Simulasi Dataset Resmi BPJS',
-    });
 
     const newConfig = {
       url: 'Simulasi Dataset Resmi BPJS',
       lastSyncedAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
       autoSync: false,
-      totalSyncedRows: existingMap.size,
+      totalSyncedRows: totalCount,
       status: 'success' as const,
       errorMessage: undefined,
     };
     setSheetConfig(newConfig);
-    await safeSetDoc(doc(db, 'config', 'sheetConfig'), newConfig);
+    safeStorage.setItem(STORAGE_KEYS.SHEET, JSON.stringify(newConfig));
+    safeSetDoc(doc(db, 'config', 'sheetConfig'), newConfig);
 
     onProgress?.(100, `Dataset sampel berhasil dimuat (${parsed.data.length} tiket).`);
 
@@ -1796,14 +1739,22 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   ): Promise<{ success: boolean; count: number; error?: string }> => {
     try {
       onProgress?.(30, 'Menganalisis teks CSV & mendeteksi pemisah...');
-      const parsed = parseCSV(csvText);
+      const parsed = await parseCSV(csvText);
       if (parsed.data.length === 0) {
         return { success: false, count: 0, error: 'Format CSV tidak valid atau baris kosong.' };
       }
-      onProgress?.(80, `Memvalidasi ${parsed.data.length} baris tiket & menyimpan ke server...`);
+      onProgress?.(80, `Memvalidasi ${parsed.data.length} baris tiket & menyimpan ke database server...`);
 
-      for (const t of parsed.data) {
-        await safeSetDoc(doc(db, 'tickets', t.nomorTiket), t);
+      try {
+        const syncRes = await callServerApi('/sync-tickets', 'POST', {
+          tickets: parsed.data,
+          mode: 'append_data',
+        });
+        if (syncRes && syncRes.success && syncRes.db) {
+          applyServerDb(syncRes.db);
+        }
+      } catch (err) {
+        console.warn('CSV server sync error:', err);
       }
 
       onProgress?.(100, `Berhasil mengimpor ${parsed.data.length} tiket.`);
@@ -1974,6 +1925,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           return t;
         })
       );
+
+      // Persist to server backend database & broadcast
+      try {
+        const serverRes = await callServerApi('/delete-evaluations', 'POST', { period });
+        if (serverRes && serverRes.success && serverRes.db) {
+          applyServerDb(serverRes.db);
+        }
+      } catch (srvErr) {
+        console.warn('Server delete evaluations error:', srvErr);
+      }
 
       return {
         success: true,
@@ -2213,19 +2174,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         return { success: false, message: 'Tidak ada baris data valid yang ditemukan pada file Excel.' };
       }
 
-      // Persist any newly registered users from Excel to Firestore server
-      if (newUsersToSave.length > 0) {
-        const userBatchItems = newUsersToSave.map((u) => ({
-          path: 'users',
-          id: u.id,
-          data: u,
-        }));
-        await batchSetDocs(userBatchItems);
-        setUsers((prev) => {
-          const updated = [...prev, ...newUsersToSave];
-          safeStorage.setItem(STORAGE_KEYS.USERS_LIST, JSON.stringify(updated));
-          return updated;
+      // Persist to server backend database & broadcast to all connected devices/IPs
+      try {
+        const syncRes = await callServerApi('/sync-state', 'POST', {
+          evaluations: newEvaluations,
+          tickets: newTickets,
+          users: newUsersToSave.length > 0 ? [...users, ...newUsersToSave] : undefined,
         });
+        if (syncRes && syncRes.success && syncRes.db) {
+          applyServerDb(syncRes.db);
+        }
+      } catch (srvErr) {
+        console.warn('Server sync error during import evaluations:', srvErr);
       }
 
       setEvaluations((prev) => [...newEvaluations, ...prev]);
@@ -2235,19 +2195,39 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         return Array.from(map.values());
       });
 
-      const batchItems = newEvaluations.map((e) => ({
-        path: 'evaluations',
-        id: e.id,
-        data: e,
-      }));
-      await batchSetDocs(batchItems);
+      if (newUsersToSave.length > 0) {
+        setUsers((prev) => {
+          const updated = [...prev, ...newUsersToSave];
+          safeStorage.setItem(STORAGE_KEYS.USERS_LIST, JSON.stringify(updated));
+          return updated;
+        });
+      }
 
-      const ticketBatchItems = newTickets.map((t) => ({
-        path: 'tickets',
-        id: t.nomorTiket,
-        data: t,
-      }));
-      await batchSetDocs(ticketBatchItems);
+      // Best-effort background Firestore write only if quota is available
+      if (!firestoreQuotaExceededGlobal) {
+        if (newUsersToSave.length > 0) {
+          const userBatchItems = newUsersToSave.map((u) => ({
+            path: 'users',
+            id: u.id,
+            data: u,
+          }));
+          await batchSetDocs(userBatchItems);
+        }
+
+        const batchItems = newEvaluations.map((e) => ({
+          path: 'evaluations',
+          id: e.id,
+          data: e,
+        }));
+        await batchSetDocs(batchItems);
+
+        const ticketBatchItems = newTickets.map((t) => ({
+          path: 'tickets',
+          id: t.nomorTiket,
+          data: t,
+        }));
+        await batchSetDocs(ticketBatchItems);
+      }
 
       return {
         success: true,
@@ -2638,6 +2618,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         pendingQaRebuttalCount,
         activeTab,
         setActiveTab,
+        firestoreQuotaExceeded,
       }}
     >
       {children}
