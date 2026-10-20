@@ -169,4 +169,5 @@ export interface GoogleSheetConfig {
   totalSyncedRows: number;
   status: 'idle' | 'syncing' | 'success' | 'error';
   errorMessage?: string;
+  dateRange?: string;
 }

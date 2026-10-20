@@ -1610,6 +1610,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
       onProgress?.(95, 'Memperbarui konfigurasi sheet & sinkronisasi status...');
 
+      const dates = ticketsToPersist.map((t: Ticket) => t.tanggalTiket).filter(Boolean).sort();
+      const minDate = dates[0] || '';
+      const maxDate = dates[dates.length - 1] || '';
+      const computedDateRange = minDate && maxDate ? (minDate === maxDate ? minDate : `${minDate} s.d. ${maxDate}`) : 'Semua Periode';
+
       const now = new Date().toISOString().replace('T', ' ').slice(0, 16);
       const newConfig = {
         url: targetUrl,
@@ -1617,8 +1622,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         autoSync: true,
         totalSyncedRows: totalCount,
         status: 'success' as const,
+        dateRange: computedDateRange,
       };
       setSheetConfig(newConfig);
+      setFilters((prev) => ({ ...prev, periode: 'all' }));
       safeStorage.setItem(STORAGE_KEYS.SHEET, JSON.stringify(newConfig));
       safeSetDoc(doc(db, 'config', 'sheetConfig'), newConfig);
 
@@ -1686,6 +1693,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         console.warn('Firestore batch save notice:', fsErr);
       }
 
+      const dates = ticketsToPersist.map((t: Ticket) => t.tanggalTiket).filter(Boolean).sort();
+      const minDate = dates[0] || '';
+      const maxDate = dates[dates.length - 1] || '';
+      const computedDateRange = minDate && maxDate ? (minDate === maxDate ? minDate : `${minDate} s.d. ${maxDate}`) : 'Semua Periode';
+
       const now = new Date().toISOString().replace('T', ' ').slice(0, 16);
       const newConfig = {
         url: `Berkas Excel: ${file.name}`,
@@ -1693,8 +1705,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         autoSync: false,
         totalSyncedRows: totalCount,
         status: 'success' as const,
+        dateRange: computedDateRange,
       };
       setSheetConfig(newConfig);
+      setFilters((prev) => ({ ...prev, periode: 'all' }));
       safeStorage.setItem(STORAGE_KEYS.SHEET, JSON.stringify(newConfig));
       safeSetDoc(doc(db, 'config', 'sheetConfig'), newConfig);
 
@@ -1741,6 +1755,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       console.warn('Server sync error fallback:', srvErr);
     }
 
+    const dates = parsed.data.map((t: Ticket) => t.tanggalTiket).filter(Boolean).sort();
+    const minDate = dates[0] || '';
+    const maxDate = dates[dates.length - 1] || '';
+    const computedDateRange = minDate && maxDate ? (minDate === maxDate ? minDate : `${minDate} s.d. ${maxDate}`) : 'Semua Periode';
+
     const newConfig = {
       url: 'Simulasi Dataset Resmi BPJS',
       lastSyncedAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
@@ -1748,8 +1767,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       totalSyncedRows: totalCount,
       status: 'success' as const,
       errorMessage: undefined,
+      dateRange: computedDateRange,
     };
     setSheetConfig(newConfig);
+    setFilters((prev) => ({ ...prev, periode: 'all' }));
     safeStorage.setItem(STORAGE_KEYS.SHEET, JSON.stringify(newConfig));
     safeSetDoc(doc(db, 'config', 'sheetConfig'), newConfig);
 

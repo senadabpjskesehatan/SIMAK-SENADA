@@ -280,10 +280,10 @@ export const GoogleSheetSyncView: React.FC = () => {
           <div className="bg-slate-50 rounded-xl p-3 border border-slate-100">
             <div className="text-[11px] font-medium text-slate-500 flex items-center gap-1">
               <Calendar className="w-3.5 h-3.5 text-amber-600" />
-              Rentang Tanggal
+              Rentang Tanggal (Periode Sinkron)
             </div>
-            <div className="text-xs font-bold text-slate-900 mt-1 truncate" title={statistics.dateRange}>
-              {statistics.dateRange}
+            <div className="text-xs font-bold text-slate-900 mt-1 truncate" title={sheetConfig.dateRange || statistics.dateRange}>
+              {sheetConfig.dateRange || statistics.dateRange || '-'}
             </div>
             <div className="text-[10px] text-slate-400 mt-0.5">
               {sheetConfig.lastSyncedAt ? `Sinkron: ${sheetConfig.lastSyncedAt}` : 'Belum disinkronkan'}

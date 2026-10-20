@@ -45,9 +45,9 @@ export const SamplingView: React.FC = () => {
   const [filterSampled, setFilterSampled] = useState<'unsampled' | 'sampled' | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Default: does not display all data until "Sampling Acak Otomatis" is clicked
+  // Default: display all matching tickets immediately so no data is hidden
   const [sampledTicketsList, setSampledTicketsList] = useState<Ticket[]>([]);
-  const [hasSampledClicked, setHasSampledClicked] = useState(false);
+  const [hasSampledClicked, setHasSampledClicked] = useState(true);
 
   // Active scoring modal
   const [activeTicket, setActiveTicket] = useState<Ticket | null>(null);
@@ -263,11 +263,11 @@ export const SamplingView: React.FC = () => {
     setHasSampledClicked(true);
   };
 
-  // Displayed tickets: default empty until Sampling Acak Otomatis is clicked
+  // Displayed tickets: show sampled list if generated, otherwise matching tickets so no data is hidden
   const displayedTickets = useMemo(() => {
-    if (!hasSampledClicked) return [];
-    return sampledTicketsList;
-  }, [hasSampledClicked, sampledTicketsList]);
+    if (sampledTicketsList.length > 0) return sampledTicketsList;
+    return matchingTickets;
+  }, [matchingTickets, sampledTicketsList]);
 
   // Download Excel / CSV for Sampling Data
   const handleDownloadExcel = () => {
