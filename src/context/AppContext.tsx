@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, ReactNode } from 'react';
 import {
   User,
   UserRole,
@@ -751,6 +751,107 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     safeStorage.setItem(STORAGE_KEYS.SHEET, JSON.stringify(sheetConfig));
   }, [sheetConfig]);
 
+  // ==========================================
+  // MULTI-IP, MULTI-DEVICE, REALTIME SERVER SYNC
+  // ==========================================
+  const callServerApi = useCallback(async (endpoint: string, method = 'POST', body?: any) => {
+    try {
+      const res = await fetch(`/api/data${endpoint}`, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+      });
+      if (!res.ok) {
+        console.warn(`[Server API] ${endpoint} returned status ${res.status}`);
+        return null;
+      }
+      return await res.json();
+    } catch (err) {
+      console.warn(`[Server API] ${endpoint} network error:`, err);
+      return null;
+    }
+  }, []);
+
+  const applyServerDb = useCallback((dbData: any) => {
+    if (!dbData || typeof dbData !== 'object') return;
+
+    if (Array.isArray(dbData.users) && dbData.users.length > 0) {
+      setUsers(dbData.users);
+      safeStorage.setItem(STORAGE_KEYS.USERS_LIST, JSON.stringify(dbData.users));
+    }
+    if (Array.isArray(dbData.indicators) && dbData.indicators.length > 0) {
+      setIndicators(dbData.indicators);
+      safeStorage.setItem(STORAGE_KEYS.INDICATORS, JSON.stringify(dbData.indicators));
+    }
+    if (Array.isArray(dbData.tickets)) {
+      const cleaned = dbData.tickets.map((t: Ticket) => ({
+        ...t,
+        kategori: cleanCategory(t.kategori),
+      }));
+      setTickets(cleaned);
+      safeStorage.setItem(STORAGE_KEYS.TICKETS, JSON.stringify(cleaned));
+    }
+    if (Array.isArray(dbData.evaluations)) {
+      setEvaluations(dbData.evaluations);
+      safeStorage.setItem(STORAGE_KEYS.EVALUATIONS, JSON.stringify(dbData.evaluations));
+    }
+    if (Array.isArray(dbData.calibrations)) {
+      setCalibrations(dbData.calibrations);
+      safeStorage.setItem(STORAGE_KEYS.CALIBRATIONS, JSON.stringify(dbData.calibrations));
+    }
+    if (dbData.sheetConfig && typeof dbData.sheetConfig === 'object') {
+      setSheetConfig(dbData.sheetConfig);
+      safeStorage.setItem(STORAGE_KEYS.SHEET, JSON.stringify(dbData.sheetConfig));
+    }
+  }, []);
+
+  // Multi-IP, Multi-Browser, Multi-Tab Real-time Server Sync (SSE + Initial Fetch + Periodic Fallback)
+  useEffect(() => {
+    // 1. Initial Load from Server
+    callServerApi('', 'GET').then((res) => {
+      if (res && res.success && res.db) {
+        applyServerDb(res.db);
+      }
+    });
+
+    // 2. Realtime updates via Server-Sent Events (SSE)
+    let eventSource: EventSource | null = null;
+    try {
+      eventSource = new EventSource('/api/data/events');
+      eventSource.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload && payload.db) {
+            applyServerDb(payload.db);
+          }
+        } catch {
+          // ignore heartbeat / ping
+        }
+      };
+      eventSource.onerror = () => {
+        // Browser automatically reconnects EventSource
+      };
+    } catch (err) {
+      console.warn('[SSE] EventSource init error:', err);
+    }
+
+    // 3. Fallback poll every 4 seconds to guarantee consistency across network hiccups
+    const pollInterval = setInterval(() => {
+      callServerApi('', 'GET').then((res) => {
+        if (res && res.success && res.db) {
+          applyServerDb(res.db);
+        }
+      });
+    }, 4000);
+
+    return () => {
+      if (eventSource) {
+        eventSource.close();
+      }
+      clearInterval(pollInterval);
+    };
+  }, [callServerApi, applyServerDb]);
+
   // Total Indicator Weight
   const totalIndicatorWeight = useMemo(() => {
     return indicators.reduce((acc, ind) => acc + (Number(ind.bobot) || 0), 0);
@@ -762,13 +863,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const avatar = newUser.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80';
     const userObj: User = { ...newUser, id, avatar };
     
-    // Optimistically update React state and local storage immediately
+    // Optimistically update React state, local storage, and server immediately
     setUsers((prev) => {
       const filtered = prev.filter(
         (u) => u.id !== id && u.username.toLowerCase() !== newUser.username.toLowerCase()
       );
       const nextUsers = [userObj, ...filtered];
       safeStorage.setItem(STORAGE_KEYS.USERS_LIST, JSON.stringify(nextUsers));
+      callServerApi('/users', 'POST', { users: nextUsers });
       return nextUsers;
     });
 
@@ -784,6 +886,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setUsers((prev) => {
       const nextUsers = prev.map((u) => (u.id === id ? { ...u, ...updated } : u));
       safeStorage.setItem(STORAGE_KEYS.USERS_LIST, JSON.stringify(nextUsers));
+      callServerApi('/users', 'POST', { users: nextUsers });
       return nextUsers;
     });
 
@@ -807,6 +910,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setUsers((prev) => {
       const nextUsers = prev.filter((u) => u.id !== id);
       safeStorage.setItem(STORAGE_KEYS.USERS_LIST, JSON.stringify(nextUsers));
+      callServerApi('/users', 'POST', { users: nextUsers });
       return nextUsers;
     });
 
@@ -821,6 +925,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const resetUsersToDefault = async () => {
     setUsers(INITIAL_USERS);
     safeStorage.setItem(STORAGE_KEYS.USERS_LIST, JSON.stringify(INITIAL_USERS));
+    callServerApi('/users', 'POST', { users: INITIAL_USERS });
     try {
       const snap = await getDocs(collection(db, 'users'));
       for (const d of snap.docs) {
@@ -847,6 +952,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       createdList.forEach((u) => userMap.set(u.username.toLowerCase(), u));
       const nextUsers = Array.from(userMap.values());
       safeStorage.setItem(STORAGE_KEYS.USERS_LIST, JSON.stringify(nextUsers));
+      callServerApi('/users', 'POST', { users: nextUsers });
       return nextUsers;
     });
 
@@ -1081,13 +1187,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
-  // Indicator Management Handlers (Tersimpan di server Firestore & cache)
+  // Indicator Management Handlers (Tersimpan di server Firestore & persistent server DB)
   const addIndicator = async (newInd: Omit<Indicator, 'id'>): Promise<{ success: boolean; error?: string }> => {
     const id = `IND-${Date.now().toString().slice(-6)}`;
     const indObj: Indicator = { ...newInd, id };
     setIndicators((prev) => {
       const next = [...prev, indObj];
       safeStorage.setItem(STORAGE_KEYS.INDICATORS, JSON.stringify(next));
+      callServerApi('/indicators', 'POST', { indicators: next });
       return next;
     });
 
@@ -1104,6 +1211,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setIndicators((prev) => {
       const next = prev.map((ind) => (ind.id === id ? { ...ind, ...updated } : ind));
       safeStorage.setItem(STORAGE_KEYS.INDICATORS, JSON.stringify(next));
+      callServerApi('/indicators', 'POST', { indicators: next });
       return next;
     });
 
@@ -1126,6 +1234,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         return u ? { ...ind, ...u } : ind;
       });
       safeStorage.setItem(STORAGE_KEYS.INDICATORS, JSON.stringify(next));
+      callServerApi('/indicators', 'POST', { indicators: next });
       return next;
     });
 
@@ -1184,6 +1293,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     setIndicators(updated);
     safeStorage.setItem(STORAGE_KEYS.INDICATORS, JSON.stringify(updated));
+    callServerApi('/indicators', 'POST', { indicators: updated });
 
     try {
       for (const ind of updated) {
@@ -1203,6 +1313,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setIndicators((prev) => {
       const next = prev.filter((ind) => ind.id !== id);
       safeStorage.setItem(STORAGE_KEYS.INDICATORS, JSON.stringify(next));
+      callServerApi('/indicators', 'POST', { indicators: next });
       return next;
     });
 
@@ -1225,6 +1336,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const resetIndicators = async (): Promise<{ success: boolean; error?: string }> => {
     setIndicators(INITIAL_INDICATORS);
     safeStorage.setItem(STORAGE_KEYS.INDICATORS, JSON.stringify(INITIAL_INDICATORS));
+    callServerApi('/reset-indicators', 'POST', {});
     try {
       const snap = await getDocs(collection(db, 'indicators'));
       const batch = writeBatch(db);
@@ -1501,6 +1613,22 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         safeStorage.setItem(STORAGE_KEYS.TICKETS, JSON.stringify(finalTickets));
       }
 
+      // Persist directly to server backend database & broadcast to all connected devices/IPs
+      try {
+        const serverSyncRes = await callServerApi('/sync-tickets', 'POST', {
+          tickets: parsed.data,
+          mode,
+          sheetUrl: targetUrl,
+        });
+        if (serverSyncRes && serverSyncRes.success && serverSyncRes.db) {
+          applyServerDb(serverSyncRes.db);
+          if (typeof serverSyncRes.addedCount === 'number') addedCount = serverSyncRes.addedCount;
+          if (typeof serverSyncRes.totalCount === 'number') totalCount = serverSyncRes.totalCount;
+        }
+      } catch (srvErr) {
+        console.warn('Server sync error fallback:', srvErr);
+      }
+
       const now = new Date().toISOString().replace('T', ' ').slice(0, 16);
       const newConfig = {
         url: targetUrl,
@@ -1568,6 +1696,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       setTickets(finalTickets);
       safeStorage.setItem(STORAGE_KEYS.TICKETS, JSON.stringify(finalTickets));
 
+      // Persist directly to server backend database & broadcast to all connected devices/IPs
+      try {
+        const serverSyncRes = await callServerApi('/sync-tickets', 'POST', {
+          tickets: parsed.data,
+          mode: 'use_data',
+          sheetUrl: `Berkas Excel: ${file.name}`,
+        });
+        if (serverSyncRes && serverSyncRes.success && serverSyncRes.db) {
+          applyServerDb(serverSyncRes.db);
+        }
+      } catch (srvErr) {
+        console.warn('Server sync error fallback:', srvErr);
+      }
+
       const now = new Date().toISOString().replace('T', ' ').slice(0, 16);
       const newConfig = {
         url: `Berkas Excel: ${file.name}`,
@@ -1621,6 +1763,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       await batchSetDocs(itemsToSet);
     }
     setTickets(Array.from(existingMap.values()));
+
+    callServerApi('/sync-tickets', 'POST', {
+      tickets: parsed.data,
+      mode: 'use_data',
+      sheetUrl: 'Simulasi Dataset Resmi BPJS',
+    });
 
     const newConfig = {
       url: 'Simulasi Dataset Resmi BPJS',
@@ -1790,6 +1938,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     safeSetDoc(doc(db, 'evaluations', samplingId), newEvaluation);
     safeSetDoc(doc(db, 'tickets', ticket.nomorTiket), { ...ticket, sampled: true, samplingId }, { merge: true });
+
+    callServerApi('/evaluation', 'POST', { evaluation: newEvaluation });
 
     return newEvaluation;
   };
@@ -2131,6 +2281,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             ],
           };
           safeSetDoc(doc(db, 'evaluations', updatedItem.id), updatedItem);
+          callServerApi('/update-evaluation', 'POST', { evaluationId: updatedItem.id, updates: updatedItem });
           return updatedItem;
         }
         return item;
@@ -2160,6 +2311,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             ],
           };
           safeSetDoc(doc(db, 'evaluations', updatedItem.id), updatedItem);
+          callServerApi('/update-evaluation', 'POST', { evaluationId: updatedItem.id, updates: updatedItem });
           return updatedItem;
         }
         return item;
@@ -2191,6 +2343,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             ],
           };
           safeSetDoc(doc(db, 'evaluations', updatedItem.id), updatedItem);
+          callServerApi('/update-evaluation', 'POST', { evaluationId: updatedItem.id, updates: updatedItem });
           return updatedItem;
         }
         return item;
@@ -2279,9 +2432,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       )
     );
 
-    // Save calibration record and update evaluation in Firestore
+    // Save calibration record and update evaluation in Firestore & persistent server DB
     safeSetDoc(doc(db, 'calibrations', calId), newCalibration);
     safeSetDoc(doc(db, 'evaluations', samplingEvaluation.id), updatedEval, { merge: true });
+    callServerApi('/calibration', 'POST', { calibration: newCalibration });
 
     setCalibrations((prev) => [newCalibration, ...prev]);
 

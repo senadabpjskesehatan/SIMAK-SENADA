@@ -2,14 +2,39 @@ import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
+import {
+  getServerDb,
+  syncTicketsInDb,
+  saveEvaluationInDb,
+  saveCalibrationInDb,
+  updateEvaluationInDb,
+  deleteEvaluationsByPeriodInDb,
+  updateIndicatorsInDb,
+  resetIndicatorsInDb,
+  updateUsersInDb,
+  clearAllDataInDb,
+  saveServerDb,
+  ServerDatabase,
+} from './src/serverDb';
 
 dotenv.config();
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+// Enable CORS for all incoming client connections (different IPs, ports, browsers, tabs)
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Initialize GoogleGenAI server-side
 const apiKey = process.env.GEMINI_API_KEY;
@@ -476,6 +501,224 @@ app.post('/api/proxy-sheet', async (req, res) => {
       success: false,
       error: error?.message || 'Gagal mengambil data dari Google Sheet atau Webservice',
     });
+  }
+});
+
+// ==========================================
+// PERSISTENT SERVER DATABASE & MULTI-USER REALTIME SYNC (SSE)
+// ==========================================
+
+// SSE Client Connections Manager for Real-Time Sync across all IPs, Tabs, and Devices
+const sseClients: express.Response[] = [];
+
+function broadcastDbUpdate(db: ServerDatabase) {
+  const payload = `data: ${JSON.stringify({ type: 'SYNC_UPDATE', db, timestamp: Date.now() })}\n\n`;
+  for (let i = sseClients.length - 1; i >= 0; i--) {
+    const client = sseClients[i];
+    try {
+      client.write(payload);
+    } catch {
+      sseClients.splice(i, 1);
+    }
+  }
+}
+
+// 1. SSE Real-Time Event Stream
+app.get('/api/data/events', (_req, res) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'Access-Control-Allow-Origin': '*',
+  });
+  res.write('\n');
+
+  // Send current server database immediately upon connecting
+  const currentDb = getServerDb();
+  res.write(`data: ${JSON.stringify({ type: 'INITIAL_STATE', db: currentDb, timestamp: Date.now() })}\n\n`);
+
+  sseClients.push(res);
+
+  // Heartbeat ping every 25 seconds to keep connection alive
+  const heartbeat = setInterval(() => {
+    try {
+      res.write(': heartbeat\n\n');
+    } catch {
+      clearInterval(heartbeat);
+    }
+  }, 25000);
+
+  _req.on('close', () => {
+    clearInterval(heartbeat);
+    const idx = sseClients.indexOf(res);
+    if (idx >= 0) sseClients.splice(idx, 1);
+  });
+});
+
+// 2. GET Full Server Database
+app.get('/api/data', (_req, res) => {
+  try {
+    const db = getServerDb();
+    res.json({ success: true, db });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Gagal memuat basis data server' });
+  }
+});
+
+// 3. POST Sync Tickets (Gunakan Data / Tambah Data)
+app.post('/api/data/sync-tickets', (req, res) => {
+  try {
+    const { tickets, mode, sheetUrl } = req.body;
+    if (!Array.isArray(tickets)) {
+      return res.status(400).json({ success: false, error: 'Data tiket tidak valid' });
+    }
+    const result = syncTicketsInDb(tickets, mode || 'use_data', sheetUrl);
+    const updatedDb = getServerDb();
+    broadcastDbUpdate(updatedDb);
+    res.json({ success: true, ...result, db: updatedDb });
+  } catch (err: any) {
+    console.error('Error sync-tickets in server:', err);
+    res.status(500).json({ success: false, error: err?.message || 'Gagal menyinkronkan tiket di server' });
+  }
+});
+
+// 4. POST Save Evaluation
+app.post('/api/data/evaluation', (req, res) => {
+  try {
+    const { evaluation } = req.body;
+    if (!evaluation || !evaluation.id) {
+      return res.status(400).json({ success: false, error: 'Data evaluasi tidak valid' });
+    }
+    const updatedDb = saveEvaluationInDb(evaluation);
+    broadcastDbUpdate(updatedDb);
+    res.json({ success: true, db: updatedDb });
+  } catch (err: any) {
+    console.error('Error save-evaluation in server:', err);
+    res.status(500).json({ success: false, error: err?.message || 'Gagal menyimpan evaluasi di server' });
+  }
+});
+
+// 5. POST Save Calibration
+app.post('/api/data/calibration', (req, res) => {
+  try {
+    const { calibration } = req.body;
+    if (!calibration || !calibration.id) {
+      return res.status(400).json({ success: false, error: 'Data kalibrasi tidak valid' });
+    }
+    const updatedDb = saveCalibrationInDb(calibration);
+    broadcastDbUpdate(updatedDb);
+    res.json({ success: true, db: updatedDb });
+  } catch (err: any) {
+    console.error('Error save-calibration in server:', err);
+    res.status(500).json({ success: false, error: err?.message || 'Gagal menyimpan kalibrasi di server' });
+  }
+});
+
+// 6. POST Update Evaluation (Petugas response / QA sanggahan)
+app.post('/api/data/update-evaluation', (req, res) => {
+  try {
+    const { evaluationId, updates } = req.body;
+    if (!evaluationId || !updates) {
+      return res.status(400).json({ success: false, error: 'Parameter update evaluasi tidak lengkap' });
+    }
+    const updatedDb = updateEvaluationInDb(evaluationId, updates);
+    broadcastDbUpdate(updatedDb);
+    res.json({ success: true, db: updatedDb });
+  } catch (err: any) {
+    console.error('Error update-evaluation in server:', err);
+    res.status(500).json({ success: false, error: err?.message || 'Gagal memperbarui evaluasi di server' });
+  }
+});
+
+// 7. POST Delete Evaluations By Period
+app.post('/api/data/delete-evaluations', (req, res) => {
+  try {
+    const { period } = req.body;
+    const result = deleteEvaluationsByPeriodInDb(period || 'all');
+    broadcastDbUpdate(result.db);
+    res.json({ success: true, ...result });
+  } catch (err: any) {
+    console.error('Error delete-evaluations in server:', err);
+    res.status(500).json({ success: false, error: err?.message || 'Gagal menghapus evaluasi di server' });
+  }
+});
+
+// 8. POST Update Indicators
+app.post('/api/data/indicators', (req, res) => {
+  try {
+    const { indicators } = req.body;
+    if (!Array.isArray(indicators)) {
+      return res.status(400).json({ success: false, error: 'Data indikator tidak valid' });
+    }
+    const updatedDb = updateIndicatorsInDb(indicators);
+    broadcastDbUpdate(updatedDb);
+    res.json({ success: true, db: updatedDb });
+  } catch (err: any) {
+    console.error('Error update-indicators in server:', err);
+    res.status(500).json({ success: false, error: err?.message || 'Gagal memperbarui indikator di server' });
+  }
+});
+
+// 9. POST Reset Indicators
+app.post('/api/data/reset-indicators', (_req, res) => {
+  try {
+    const updatedDb = resetIndicatorsInDb();
+    broadcastDbUpdate(updatedDb);
+    res.json({ success: true, db: updatedDb });
+  } catch (err: any) {
+    console.error('Error reset-indicators in server:', err);
+    res.status(500).json({ success: false, error: err?.message || 'Gagal mereset indikator di server' });
+  }
+});
+
+// 10. POST Update Users
+app.post('/api/data/users', (req, res) => {
+  try {
+    const { users } = req.body;
+    if (!Array.isArray(users)) {
+      return res.status(400).json({ success: false, error: 'Data user tidak valid' });
+    }
+    const updatedDb = updateUsersInDb(users);
+    broadcastDbUpdate(updatedDb);
+    res.json({ success: true, db: updatedDb });
+  } catch (err: any) {
+    console.error('Error update-users in server:', err);
+    res.status(500).json({ success: false, error: err?.message || 'Gagal memperbarui user di server' });
+  }
+});
+
+// 11. POST Clear All Data
+app.post('/api/data/clear-all', (_req, res) => {
+  try {
+    const updatedDb = clearAllDataInDb();
+    broadcastDbUpdate(updatedDb);
+    res.json({ success: true, db: updatedDb });
+  } catch (err: any) {
+    console.error('Error clear-all in server:', err);
+    res.status(500).json({ success: false, error: err?.message || 'Gagal mereset semua data di server' });
+  }
+});
+
+// 12. POST Push / Merge Full State
+app.post('/api/data/sync-state', (req, res) => {
+  try {
+    const { state } = req.body;
+    const current = getServerDb();
+    if (state && typeof state === 'object') {
+      const merged: ServerDatabase = {
+        ...current,
+        ...state,
+        version: (current.version || 0) + 1,
+        lastUpdated: new Date().toISOString(),
+      };
+      saveServerDb(merged);
+      broadcastDbUpdate(merged);
+      return res.json({ success: true, db: merged });
+    }
+    res.json({ success: true, db: current });
+  } catch (err: any) {
+    console.error('Error sync-state in server:', err);
+    res.status(500).json({ success: false, error: err?.message || 'Gagal sinkronisasi state di server' });
   }
 });
 
