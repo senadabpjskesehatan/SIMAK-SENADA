@@ -577,27 +577,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     safeStorage.setItem(STORAGE_KEYS.TICKETS, JSON.stringify(tickets));
   }, [tickets]);
 
+  // 5. Tickets synced with server via SSE/Initial Fetch
   useEffect(() => {
-    const unsubscribe = onSnapshot(
-      collection(db, 'tickets'),
-      (snapshot) => {
-        const ticketsList: Ticket[] = [];
-        snapshot.forEach((docSnap) => {
-          const t = docSnap.data() as Ticket;
-          ticketsList.push({
-            ...t,
-            kategori: cleanCategory(t.kategori),
-          });
-        });
-        setTickets(ticketsList);
-        safeStorage.setItem(STORAGE_KEYS.TICKETS, JSON.stringify(ticketsList));
-      },
-      (error) => {
-        handleFirestoreError(error, 'onSnapshot', 'tickets');
-      }
-    );
-    return () => unsubscribe();
+    // Tickets are now synced directly via initial fetch and SSE events in applyServerDb
+    // Firestore listener for tickets removed to prevent empty collection state overwrites
   }, []);
+
 
   // 6. Sampling Evaluations synced with Firestore & localStorage cache
   const [evaluations, setEvaluations] = useState<SamplingEvaluation[]>(() => {
