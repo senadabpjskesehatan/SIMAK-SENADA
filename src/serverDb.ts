@@ -21,7 +21,24 @@ export interface ServerDatabase {
   sheetConfig: GoogleSheetConfig;
 }
 
-const DB_DIR = path.resolve(process.cwd(), 'data');
+const DB_DIR = (() => {
+  try {
+    const testDir = path.resolve(process.cwd(), 'data');
+    if (!fs.existsSync(testDir)) {
+      fs.mkdirSync(testDir, { recursive: true });
+    }
+    const testFile = path.join(testDir, '.test_write');
+    fs.writeFileSync(testFile, 'test');
+    fs.unlinkSync(testFile);
+    return testDir;
+  } catch {
+    const tmpDir = '/tmp/senada_db_data';
+    if (!fs.existsSync(tmpDir)) {
+      fs.mkdirSync(tmpDir, { recursive: true });
+    }
+    return tmpDir;
+  }
+})();
 const DB_FILE = path.join(DB_DIR, 'senada_db.json');
 const DB_TMP = path.join(DB_DIR, 'senada_db.tmp.json');
 

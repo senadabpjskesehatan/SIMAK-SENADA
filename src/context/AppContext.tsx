@@ -1580,6 +1580,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       // 1. Primary Sync: Persist directly to server backend database & broadcast to all connected devices/IPs
       let addedCount = parsed.data.length;
       let totalCount = parsed.data.length;
+      let ticketsToPersist = parsed.data;
       try {
         const serverSyncRes = await callServerApi('/sync-tickets', 'POST', {
           tickets: parsed.data,
@@ -1590,9 +1591,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           applyServerDb(serverSyncRes.db);
           if (typeof serverSyncRes.addedCount === 'number') addedCount = serverSyncRes.addedCount;
           if (typeof serverSyncRes.totalCount === 'number') totalCount = serverSyncRes.totalCount;
+          if (Array.isArray(serverSyncRes.db.tickets)) {
+            ticketsToPersist = serverSyncRes.db.tickets;
+          }
         }
       } catch (srvErr) {
         console.warn('Server sync error fallback:', srvErr);
+      }
+
+      // Also persist to Firestore collection 'tickets' for enterprise reliability across container instances
+      try {
+        if (ticketsToPersist.length > 0) {
+          await batchSetDocs(ticketsToPersist.map(t => ({ path: 'tickets', id: t.nomorTiket, data: t })));
+        }
+      } catch (fsErr) {
+        console.warn('Firestore batch save notice:', fsErr);
       }
 
       onProgress?.(95, 'Memperbarui konfigurasi sheet & sinkronisasi status...');
@@ -1644,6 +1657,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
       let addedCount = parsed.data.length;
       let totalCount = parsed.data.length;
+      let ticketsToPersist = parsed.data;
 
       // Persist directly to server backend database & broadcast to all connected devices/IPs
       try {
@@ -1656,9 +1670,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           applyServerDb(serverSyncRes.db);
           if (typeof serverSyncRes.addedCount === 'number') addedCount = serverSyncRes.addedCount;
           if (typeof serverSyncRes.totalCount === 'number') totalCount = serverSyncRes.totalCount;
+          if (Array.isArray(serverSyncRes.db.tickets)) {
+            ticketsToPersist = serverSyncRes.db.tickets;
+          }
         }
       } catch (srvErr) {
         console.warn('Server sync error fallback:', srvErr);
+      }
+
+      try {
+        if (ticketsToPersist.length > 0) {
+          await batchSetDocs(ticketsToPersist.map(t => ({ path: 'tickets', id: t.nomorTiket, data: t })));
+        }
+      } catch (fsErr) {
+        console.warn('Firestore batch save notice:', fsErr);
       }
 
       const now = new Date().toISOString().replace('T', ' ').slice(0, 16);
