@@ -168,12 +168,12 @@ export function syncTicketsInDb(
   let addedCount = 0;
 
   if (mode === 'append_data') {
-    // Mode Tambah Data: Only add tickets that do not already exist based on nomorTiket and tanggalTiket
+    // Mode Tambah/Update Data: Add new tickets, update existing ones without deleting anything
     finalTickets = [...db.tickets];
     for (const inc of incomingTickets) {
       const key = `${String(inc.nomorTiket || '').trim()}__${String(inc.tanggalTiket || '').trim()}`;
       if (!existingTicketMap.has(key)) {
-        // Check if previously sampled
+        // Add new
         const num = String(inc.nomorTiket || '').trim();
         const isSampled = sampledSet.has(num);
         const ticketToAdd: Ticket = {
@@ -184,6 +184,18 @@ export function syncTicketsInDb(
         finalTickets.push(ticketToAdd);
         existingTicketMap.set(key, ticketToAdd);
         addedCount++;
+      } else {
+        // Update existing (preserving sampled status)
+        const index = finalTickets.findIndex(t => `${String(t.nomorTiket || '').trim()}__${String(t.tanggalTiket || '').trim()}` === key);
+        if (index !== -1) {
+            const existing = finalTickets[index];
+            finalTickets[index] = {
+                ...existing,
+                ...inc,
+                sampled: existing.sampled,
+                samplingId: existing.samplingId
+            };
+        }
       }
     }
   } else {
