@@ -297,14 +297,15 @@ Silakan berikan penilaian JSON untuk SEMUA ID indikator di atas!`;
 });
 
 // Endpoint 2: Proxy to fetch Google Sheet CSV, Apps Script Webservice, or public data to bypass CORS
-app.post('/api/proxy-sheet', async (req, res) => {
+// Endpoint 2: Proxy to fetch Google Sheet CSV, Apps Script Webservice, or public data to bypass CORS
+app.all(['/api/proxy-sheet', '/api/data/proxy-sheet', '/proxy-sheet', '/api/proxy-sheet/'], async (req, res) => {
   try {
-    const { url } = req.body;
-    if (!url || typeof url !== 'string' || !url.trim()) {
+    const rawUrl = (req.body?.url || req.query?.url || '') as string;
+    if (!rawUrl || typeof rawUrl !== 'string' || !rawUrl.trim()) {
       return res.status(400).json({ success: false, error: 'URL Google Sheet / Webservice tidak valid atau kosong' });
     }
 
-    let targetUrl = url.trim();
+    let targetUrl = rawUrl.trim().replace(/^[<"']|[>"']$/g, '');
     let csvData = '';
     const gidMatch = targetUrl.match(/[#&?]gid=([0-9]+)/);
     const gid = gidMatch ? gidMatch[1] : '0';
@@ -315,6 +316,8 @@ app.post('/api/proxy-sheet', async (req, res) => {
       Accept: 'application/json, text/csv, text/plain, */*',
     };
 
+    let lastStatus = 200;
+
     // 1. Google Apps Script Web App / Web Service (script.google.com/macros/s/.../exec)
     if (targetUrl.includes('script.google.com') || targetUrl.includes('script.googleusercontent.com')) {
       try {
@@ -324,6 +327,7 @@ app.post('/api/proxy-sheet', async (req, res) => {
           signal: AbortSignal.timeout(12000),
         });
 
+        lastStatus = gasRes.status;
         const gasText = await gasRes.text();
 
         if (gasText.includes('accounts.google.com') || gasText.includes('ServiceLogin')) {
@@ -347,7 +351,7 @@ app.post('/api/proxy-sheet', async (req, res) => {
         console.warn('Apps Script fetch error:', err);
         return res.status(500).json({
           success: false,
-          error: `Gagal menghubungi Webservice Google Apps Script: ${err?.message || 'Waktu tunggu habis (timeout)'}. Pastikan URL berakhiran /exec dan dapat diakses.`,
+          error: `Gagal menghubungi Webservice Google Apps Script: ${err?.message || 'Waktu tunggu habis (timeout)'}. Pastikan URL berakhiran /exec dan dapat diakses publik.`,
         });
       }
     }
@@ -363,6 +367,7 @@ app.post('/api/proxy-sheet', async (req, res) => {
             redirect: 'follow',
             signal: AbortSignal.timeout(9000),
           });
+          lastStatus = pubRes.status;
           const text = await pubRes.text();
           if (pubRes.ok && !text.trim().startsWith('<!DOCTYPE') && !text.trim().startsWith('<html')) {
             csvData = text;
@@ -373,10 +378,11 @@ app.post('/api/proxy-sheet', async (req, res) => {
         }
       }
     }
-    // 3. Standard Google Sheet URL (docs.google.com/spreadsheets/d/{id})
+    // 3. Standard Google Sheet URL (docs.google.com/spreadsheets/d/{id}) or Google Drive file link
     else {
       const sheetIdMatch =
         targetUrl.match(/\/spreadsheets(?:\/u\/\d+)?\/d\/([a-zA-Z0-9-_]+)/) ||
+        targetUrl.match(/\/file\/d\/([a-zA-Z0-9-_]+)/) ||
         targetUrl.match(/[?&]id=([a-zA-Z0-9-_]+)/);
 
       if (sheetIdMatch) {
@@ -391,6 +397,7 @@ app.post('/api/proxy-sheet', async (req, res) => {
             redirect: 'follow',
             signal: AbortSignal.timeout(12000),
           });
+          lastStatus = expRes.status;
           const expText = await expRes.text();
           if (
             expRes.ok &&
@@ -414,6 +421,7 @@ app.post('/api/proxy-sheet', async (req, res) => {
               redirect: 'follow',
               signal: AbortSignal.timeout(12000),
             });
+            if (gvizRes.status) lastStatus = gvizRes.status;
             const gvizText = await gvizRes.text();
             if (
               gvizRes.ok &&
@@ -438,6 +446,7 @@ app.post('/api/proxy-sheet', async (req, res) => {
               redirect: 'follow',
               signal: AbortSignal.timeout(9000),
             });
+            if (gvizJsonRes.status) lastStatus = gvizJsonRes.status;
             const gvizJsonText = await gvizJsonRes.text();
             if (
               gvizJsonRes.ok &&
@@ -461,6 +470,7 @@ app.post('/api/proxy-sheet', async (req, res) => {
           redirect: 'follow',
           signal: AbortSignal.timeout(10000),
         });
+        if (directRes.status) lastStatus = directRes.status;
         const directText = await directRes.text();
         if (directRes.ok && !directText.trim().startsWith('<!DOCTYPE') && !directText.trim().startsWith('<html')) {
           csvData = directText;
@@ -470,12 +480,19 @@ app.post('/api/proxy-sheet', async (req, res) => {
       }
     }
 
-    // Verification check for permissions / HTML error page
+    // Check specific Google errors
     if (!csvData || !csvData.trim()) {
+      if (lastStatus === 404) {
+        return res.status(404).json({
+          success: false,
+          error:
+            'File Google Spreadsheet tidak ditemukan di server Google (HTTP 404). Pastikan ID Spreadsheet atau tautan sudah benar dan belum dihapus di Google Drive.',
+        });
+      }
       return res.status(400).json({
         success: false,
         error:
-          "Server tidak menerima data (respons kosong). Pastikan link Google Sheet atau Webservice dapat diakses secara publik atau gunakan opsi 'Unggah Berkas Excel (.xlsx)' secara langsung.",
+          "Server tidak menerima data (respons kosong). Pastikan link Google Sheet atau Webservice dapat diakses secara publik (Anyone with the link can view) atau gunakan opsi 'Unggah Berkas Excel (.xlsx)' secara langsung.",
       });
     }
 

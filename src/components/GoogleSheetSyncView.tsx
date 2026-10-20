@@ -395,7 +395,7 @@ export const GoogleSheetSyncView: React.FC = () => {
                 type="button"
                 onClick={(e) => handleSyncGoogleSheet(e, 'append_data')}
                 disabled={isSyncing}
-                className="px-4 py-2.5 bg-teal-700 hover:bg-teal-800 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow-xs flex items-center justify-center gap-1.5 transition cursor-pointer shrink-0"
+                className="hidden px-4 py-2.5 bg-teal-700 hover:bg-teal-800 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow-xs items-center justify-center gap-1.5 transition cursor-pointer shrink-0"
                 title="Menambahkan data sampling baru tanpa duplikasi berdasarkan nomor tiket & tanggal tiket."
               >
                 <Layers className="w-3.5 h-3.5" />
