@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
+import { formatJakartaTime } from '../utils/dateUtils';
 import { SamplingEvaluation, SanggahanData } from '../types';
 import {
   Inbox,
@@ -163,8 +164,9 @@ export const PetugasInboxView: React.FC = () => {
       return;
     }
 
+
     const payload: SanggahanData = {
-      tanggalSanggah: new Date().toISOString().replace('T', ' ').slice(0, 19),
+      tanggalSanggah: formatJakartaTime(new Date()),
       alasanSanggahan: 'Sanggahan Penilaian Mutu Tiket',
       argumenPetugas: argumenPetugas.trim(),
       petugasName: currentUser?.name || 'Petugas',

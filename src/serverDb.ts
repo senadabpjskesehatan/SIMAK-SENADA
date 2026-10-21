@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { formatJakartaTime } from './utils/dateUtils';
 import {
   User,
   Indicator,
@@ -65,7 +66,7 @@ export function loadServerDb(): ServerDatabase {
       if (parsed && typeof parsed === 'object') {
         memoryDb = {
           version: typeof parsed.version === 'number' ? parsed.version : 1,
-          lastUpdated: parsed.lastUpdated || new Date().toISOString(),
+          lastUpdated: parsed.lastUpdated || formatJakartaTime(new Date()),
           users: Array.isArray(parsed.users) && parsed.users.length > 0 ? parsed.users : INITIAL_USERS,
           indicators: Array.isArray(parsed.indicators) && parsed.indicators.length > 0 ? parsed.indicators : INITIAL_INDICATORS,
           tickets: Array.isArray(parsed.tickets) ? parsed.tickets : [],
@@ -88,7 +89,7 @@ export function loadServerDb(): ServerDatabase {
   // Initialize fresh database
   memoryDb = {
     version: 1,
-    lastUpdated: new Date().toISOString(),
+    lastUpdated: formatJakartaTime(new Date()),
     users: [...INITIAL_USERS],
     indicators: [...INITIAL_INDICATORS],
     tickets: [],
@@ -109,7 +110,7 @@ export function loadServerDb(): ServerDatabase {
 export function saveServerDb(db: ServerDatabase): void {
   ensureDbDirectory();
   db.version = (db.version || 0) + 1;
-  db.lastUpdated = new Date().toISOString();
+  db.lastUpdated = formatJakartaTime(new Date());
   memoryDb = db;
 
   try {
@@ -238,7 +239,7 @@ export function syncTicketsInDb(
     ...db.sheetConfig,
     url: sheetUrl || db.sheetConfig.url,
     totalSyncedRows: finalTickets.length,
-    lastSyncedAt: new Date().toISOString().replace('T', ' ').slice(0, 19),
+    lastSyncedAt: formatJakartaTime(new Date()),
     status: 'success',
   };
 
