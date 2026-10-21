@@ -748,21 +748,69 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }, [evaluations]);
 
   useEffect(() => {
-    const unsubscribe = onSnapshot(
+    // 1. Direct collection listener
+    const unsubscribeCol = onSnapshot(
       collection(db, 'evaluations'),
       (snapshot) => {
         const evalList: SamplingEvaluation[] = [];
         snapshot.forEach((docSnap) => {
           evalList.push(docSnap.data() as SamplingEvaluation);
         });
-        setEvaluations(evalList);
-        safeStorage.setItem(STORAGE_KEYS.EVALUATIONS, JSON.stringify(evalList));
+        if (evalList.length > 0) {
+          setEvaluations((prev) => {
+            const map = new Map(prev.map((e) => [e.id, e]));
+            evalList.forEach((e) => map.set(e.id, e));
+            const merged = Array.from(map.values());
+            safeStorage.setItem(STORAGE_KEYS.EVALUATIONS, JSON.stringify(merged));
+            return merged;
+          });
+        }
       },
       (error) => {
         handleFirestoreError(error, 'onSnapshot', 'evaluations');
       }
     );
-    return () => unsubscribe();
+
+    // 2. Bundle listener for multi-device & Netlify instant sync
+    const unsubscribeBundle = onSnapshot(
+      doc(db, 'system_data', 'evaluations_bundle'),
+      async (docSnap) => {
+        try {
+          if (!docSnap.exists()) return;
+          const data = docSnap.data();
+          if (Array.isArray(data?.evaluations) && data.evaluations.length > 0) {
+            setEvaluations(data.evaluations);
+            safeStorage.setItem(STORAGE_KEYS.EVALUATIONS, JSON.stringify(data.evaluations));
+          } else if (data?.chunkCount && data.chunkCount > 1) {
+            const promises = [];
+            for (let i = 0; i < data.chunkCount; i++) {
+              promises.push(getDoc(doc(db, 'system_data', `evaluations_bundle_part_${i}`)));
+            }
+            const snaps = await Promise.all(promises);
+            let combined: SamplingEvaluation[] = [];
+            for (const snap of snaps) {
+              if (snap.exists() && Array.isArray(snap.data()?.evaluations)) {
+                combined = combined.concat(snap.data().evaluations);
+              }
+            }
+            if (combined.length > 0) {
+              setEvaluations(combined);
+              safeStorage.setItem(STORAGE_KEYS.EVALUATIONS, JSON.stringify(combined));
+            }
+          }
+        } catch (err: any) {
+          console.warn('Firestore evaluations_bundle sync notice:', err?.message);
+        }
+      },
+      (error) => {
+        handleFirestoreError(error, 'onSnapshot', 'system_data/evaluations_bundle');
+      }
+    );
+
+    return () => {
+      unsubscribeCol();
+      unsubscribeBundle();
+    };
   }, []);
 
   // 7. Calibrations synced with Firestore & localStorage cache
@@ -989,6 +1037,48 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       await batchSetDocs(sampleItems);
     } catch (err) {
       console.warn('Error saving tickets bundle to Firestore:', err);
+    }
+  }, []);
+
+  // Persist evaluations bundle to Firestore for seamless Netlify, multi-device, and cross-IP access
+  const saveEvaluationsToFirestore = useCallback(async (allEvaluations: SamplingEvaluation[]) => {
+    if (firestoreQuotaExceededGlobal || !allEvaluations || allEvaluations.length === 0) return;
+    try {
+      const CHUNK_SIZE = 400;
+      if (allEvaluations.length <= CHUNK_SIZE) {
+        await safeSetDoc(doc(db, 'system_data', 'evaluations_bundle'), {
+          evaluations: cleanFirestoreData(allEvaluations),
+          totalCount: allEvaluations.length,
+          updatedAt: formatJakartaTime(new Date()),
+        });
+      } else {
+        const chunks: SamplingEvaluation[][] = [];
+        for (let i = 0; i < allEvaluations.length; i += CHUNK_SIZE) {
+          chunks.push(allEvaluations.slice(i, i + CHUNK_SIZE));
+        }
+        await safeSetDoc(doc(db, 'system_data', 'evaluations_bundle'), {
+          chunkCount: chunks.length,
+          totalCount: allEvaluations.length,
+          updatedAt: formatJakartaTime(new Date()),
+        });
+        for (let i = 0; i < chunks.length; i++) {
+          await safeSetDoc(doc(db, 'system_data', `evaluations_bundle_part_${i}`), {
+            evaluations: cleanFirestoreData(chunks[i]),
+            partIndex: i,
+            partCount: chunks.length,
+          });
+        }
+      }
+
+      // Also batch-set individual evaluations for direct queries
+      const sampleItems = allEvaluations.slice(0, 100).map((e) => ({
+        path: 'evaluations',
+        id: toSafeDocId(e.id),
+        data: e,
+      }));
+      await batchSetDocs(sampleItems);
+    } catch (err) {
+      console.warn('Error saving evaluations bundle to Firestore:', err);
     }
   }, []);
 
@@ -2443,12 +2533,38 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         console.warn('Server sync error during import evaluations:', srvErr);
       }
 
-      setEvaluations((prev) => [...newEvaluations, ...prev]);
-      setTickets((prev) => {
-        const map = new Map(prev.map((t) => [t.nomorTiket, t]));
-        newTickets.forEach((t) => map.set(t.nomorTiket, t));
-        return Array.from(map.values());
-      });
+      // 1. Update evaluations locally and persist bundle to Firestore
+      const updatedEvals = [...newEvaluations, ...evaluations.filter(e => !newEvaluations.some(ne => ne.id === e.id))];
+      setEvaluations(updatedEvals);
+      safeStorage.setItem(STORAGE_KEYS.EVALUATIONS, JSON.stringify(updatedEvals));
+      await saveEvaluationsToFirestore(updatedEvals);
+
+      // 2. Update tickets locally and persist bundle to Firestore
+      const map = new Map(tickets.map((t) => [t.nomorTiket, t]));
+      newTickets.forEach((t) => map.set(t.nomorTiket, t));
+      const allUpdatedTickets = Array.from(map.values());
+      setTickets(allUpdatedTickets);
+      safeStorage.setItem(STORAGE_KEYS.TICKETS, JSON.stringify(allUpdatedTickets));
+      await saveTicketsToFirestore(allUpdatedTickets, 'append_data');
+
+      // 3. Update sheetConfig so all devices display the same count
+      const now = formatJakartaTime(new Date());
+      const dates = allUpdatedTickets.map((t: Ticket) => t.tanggalTiket).filter(Boolean).sort();
+      const minDate = dates[0] || '';
+      const maxDate = dates[dates.length - 1] || '';
+      const computedDateRange = minDate && maxDate ? (minDate === maxDate ? minDate : `${minDate} s.d. ${maxDate}`) : 'Semua Periode';
+      const newConfig: GoogleSheetConfig = {
+        url: `Upload Excel: ${file.name}`,
+        lastSyncedAt: now,
+        autoSync: false,
+        totalSyncedRows: allUpdatedTickets.length,
+        status: 'success',
+        dateRange: computedDateRange,
+      };
+      setSheetConfig(newConfig);
+      setFilters((prev) => ({ ...prev, periode: 'all' }));
+      safeStorage.setItem(STORAGE_KEYS.SHEET, JSON.stringify(newConfig));
+      safeSetDoc(doc(db, 'config', 'sheetConfig'), newConfig);
 
       if (newUsersToSave.length > 0) {
         setUsers((prev) => {
@@ -2815,6 +2931,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     safeStorage.removeItem(STORAGE_KEYS.CALIBRATIONS);
     safeStorage.removeItem(STORAGE_KEYS.USERS_LIST);
     safeStorage.removeItem(STORAGE_KEYS.SHEET);
+    safeSetDoc(doc(db, 'system_data', 'tickets_bundle'), { tickets: [], totalCount: 0, updatedAt: formatJakartaTime(new Date()) });
+    safeSetDoc(doc(db, 'system_data', 'evaluations_bundle'), { evaluations: [], totalCount: 0, updatedAt: formatJakartaTime(new Date()) });
   };
 
   return (

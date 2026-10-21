@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import {
   FileSpreadsheet,
@@ -20,6 +20,7 @@ import {
   Database,
   Check,
   Sparkles,
+  Upload,
 } from 'lucide-react';
 import { generateSampleGoogleSheetCSV, cleanCategory } from '../utils/csvParser';
 import { formatJakartaTime } from '../utils/dateUtils';
@@ -29,6 +30,7 @@ export const GoogleSheetSyncView: React.FC = () => {
   const {
     sheetConfig,
     syncGoogleSheet,
+    importExcelFile,
     loadSampleSheetData,
     tickets,
     setActiveTab,
@@ -37,6 +39,7 @@ export const GoogleSheetSyncView: React.FC = () => {
 
   // Input state for Google Sheet URL
   const [inputUrl, setInputUrl] = useState(sheetConfig.url || '');
+  const excelFileInputRef = useRef<HTMLInputElement>(null);
 
   // Sync / Loading Progress states
   const [isSyncing, setIsSyncing] = useState(false);
@@ -90,6 +93,34 @@ export const GoogleSheetSyncView: React.FC = () => {
       source: mode === 'use_data' ? 'Gunakan Data (Perbarui Server)' : 'Tambah Data (Append Tanpa Duplikasi)',
     });
     setCurrentPage(1);
+  };
+
+  // Handler for Excel / CSV File Upload
+  const handleExcelUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsSyncing(true);
+    setSyncProgress(10);
+    setSyncStepText(`Membaca berkas Excel: ${file.name}...`);
+    setSyncStatus(null);
+
+    const result = await importExcelFile(file, (pct, text) => {
+      setSyncProgress(pct);
+      setSyncStepText(text);
+    });
+
+    setIsSyncing(false);
+    setSyncStatus({
+      success: result.success,
+      message: result.message,
+      count: result.count,
+      source: `Upload Berkas Excel (${file.name})`,
+    });
+    setCurrentPage(1);
+    if (excelFileInputRef.current) {
+      excelFileInputRef.current.value = '';
+    }
   };
 
   // Handler for Loading Sample Dataset
@@ -402,6 +433,40 @@ export const GoogleSheetSyncView: React.FC = () => {
                 <Layers className="w-3.5 h-3.5" />
                 Tambah Data
               </button>
+            </div>
+          </div>
+
+          {/* Direct Excel File Upload Option */}
+          <div className="pt-2 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+            <div className="flex items-center gap-2.5">
+              <span className="p-2 rounded-lg bg-emerald-100 text-emerald-800 shrink-0">
+                <FileSpreadsheet className="w-4 h-4" />
+              </span>
+              <div>
+                <span className="text-xs font-bold text-slate-800 block">
+                  Atau Unggah Berkas Excel (.xlsx, .xls) / CSV Langsung:
+                </span>
+                <span className="text-[11px] text-slate-500">
+                  Data tiket otomatis tersimpan permanen dan terbaca identik pada menu Dashboard di seluruh perangkat, IP, dan jaringan lain.
+                </span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 w-full sm:w-auto shrink-0">
+              <input
+                ref={excelFileInputRef}
+                type="file"
+                accept=".xlsx, .xls, .csv"
+                onChange={handleExcelUpload}
+                className="hidden"
+                id="excel-tickets-upload-input"
+              />
+              <label
+                htmlFor="excel-tickets-upload-input"
+                className={`px-4 py-2 bg-white hover:bg-slate-50 border border-slate-300 hover:border-slate-400 text-slate-800 rounded-xl text-xs font-bold shadow-2xs flex items-center justify-center gap-1.5 cursor-pointer transition w-full sm:w-auto ${isSyncing ? 'opacity-50 pointer-events-none' : ''}`}
+              >
+                <Upload className="w-3.5 h-3.5 text-emerald-700" />
+                Pilih Berkas Excel / CSV
+              </label>
             </div>
           </div>
 
