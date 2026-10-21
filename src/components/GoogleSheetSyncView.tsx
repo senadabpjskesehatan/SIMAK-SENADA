@@ -22,6 +22,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { generateSampleGoogleSheetCSV, cleanCategory } from '../utils/csvParser';
+import { formatJakartaTime } from '../utils/dateUtils';
 import { Ticket } from '../types';
 
 export const GoogleSheetSyncView: React.FC = () => {
@@ -286,7 +287,7 @@ export const GoogleSheetSyncView: React.FC = () => {
               {sheetConfig.dateRange || statistics.dateRange || '-'}
             </div>
             <div className="text-[10px] text-slate-400 mt-0.5">
-              {sheetConfig.lastSyncedAt ? `Sinkron: ${sheetConfig.lastSyncedAt}` : 'Belum disinkronkan'}
+              {sheetConfig.lastSyncedAt ? `Sinkron: ${formatJakartaTime(new Date(sheetConfig.lastSyncedAt))}` : 'Belum disinkronkan'}
             </div>
           </div>
         </div>

@@ -26,6 +26,7 @@ import * as XLSX from 'xlsx';
 import {
   collection,
   getDocs,
+  getDoc,
   setDoc,
   deleteDoc,
   doc,
@@ -36,6 +37,7 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
+import { formatJakartaTime } from '../utils/dateUtils';
 
 const cleanFirestoreData = (obj: any): any => {
   if (obj === null || typeof obj !== 'object') {
@@ -377,9 +379,111 @@ const safeStorage = {
   safeStorage.removeItem(`senada_user_${ver}`);
   safeStorage.removeItem(`senada_users_list_${ver}`);
 });
-// Purge any lingering user in localStorage so browser close strictly requires login
-safeStorage.removeItem('senada_user_session_v10');
-safeStorage.removeItem('senada_user_v10_nodata');
+
+// Robust ticket synchronization & merging engine for Client, Server, and Netlify
+export function mergeTicketsList(
+  currentTickets: Ticket[],
+  incomingTickets: Ticket[],
+  evaluations: SamplingEvaluation[],
+  mode: 'use_data' | 'append_data' = 'use_data'
+): { nextTickets: Ticket[]; addedCount: number; totalCount: number } {
+  const sampledSet = new Set<string>();
+  const evalMap = new Map<string, string>();
+  evaluations.forEach((e) => {
+    const num = String(e.nomorTiket || '').trim();
+    if (num) {
+      sampledSet.add(num);
+      evalMap.set(num, e.id);
+    }
+  });
+
+  const existingSampledTickets: Ticket[] = [];
+  const existingTicketMap = new Map<string, Ticket>();
+
+  currentTickets.forEach((t) => {
+    const key = `${String(t.nomorTiket || '').trim()}__${String(t.tanggalTiket || '').trim()}`;
+    existingTicketMap.set(key, t);
+    const num = String(t.nomorTiket || '').trim();
+    if (t.sampled || sampledSet.has(num)) {
+      existingSampledTickets.push({
+        ...t,
+        sampled: true,
+        samplingId: t.samplingId || evalMap.get(num),
+      });
+    }
+  });
+
+  let nextTickets: Ticket[] = [];
+  let addedCount = 0;
+
+  if (mode === 'append_data') {
+    nextTickets = [...currentTickets];
+    for (const inc of incomingTickets) {
+      const key = `${String(inc.nomorTiket || '').trim()}__${String(inc.tanggalTiket || '').trim()}`;
+      if (!existingTicketMap.has(key)) {
+        const num = String(inc.nomorTiket || '').trim();
+        const isSampled = sampledSet.has(num);
+        const ticketToAdd: Ticket = {
+          ...inc,
+          kategori: cleanCategory(inc.kategori),
+          sampled: isSampled,
+          samplingId: isSampled ? evalMap.get(num) : undefined,
+        };
+        nextTickets.push(ticketToAdd);
+        existingTicketMap.set(key, ticketToAdd);
+        addedCount++;
+      } else {
+        const index = nextTickets.findIndex(
+          (t) => `${String(t.nomorTiket || '').trim()}__${String(t.tanggalTiket || '').trim()}` === key
+        );
+        if (index !== -1) {
+          const existing = nextTickets[index];
+          nextTickets[index] = {
+            ...existing,
+            ...inc,
+            kategori: cleanCategory(inc.kategori || existing.kategori),
+            sampled: existing.sampled,
+            samplingId: existing.samplingId,
+          };
+        }
+      }
+    }
+  } else {
+    // Mode Gunakan Data: Ganti seluruh data yang belum disampling, pertahankan data yang telah disampling
+    const sampledTicketNumberMap = new Map<string, Ticket>();
+    existingSampledTickets.forEach((t) => {
+      sampledTicketNumberMap.set(String(t.nomorTiket || '').trim(), t);
+    });
+
+    const incomingMap = new Map<string, Ticket>();
+    for (const inc of incomingTickets) {
+      const num = String(inc.nomorTiket || '').trim();
+      const isSampled = sampledSet.has(num) || sampledTicketNumberMap.has(num);
+      const existingSampled = sampledTicketNumberMap.get(num);
+
+      const processedTicket: Ticket = {
+        ...inc,
+        kategori: cleanCategory(inc.kategori),
+        sampled: isSampled,
+        samplingId: isSampled ? (existingSampled?.samplingId || evalMap.get(num)) : undefined,
+      };
+
+      const key = `${num}__${String(inc.tanggalTiket || '').trim()}`;
+      incomingMap.set(key, processedTicket);
+      addedCount++;
+    }
+
+    nextTickets = Array.from(incomingMap.values());
+    for (const sTicket of existingSampledTickets) {
+      const key = `${String(sTicket.nomorTiket || '').trim()}__${String(sTicket.tanggalTiket || '').trim()}`;
+      if (!incomingMap.has(key)) {
+        nextTickets.unshift(sTicket);
+      }
+    }
+  }
+
+  return { nextTickets, addedCount, totalCount: nextTickets.length };
+}
 
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   // Firestore Quota tracker
@@ -577,10 +681,51 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     safeStorage.setItem(STORAGE_KEYS.TICKETS, JSON.stringify(tickets));
   }, [tickets]);
 
-  // 5. Tickets synced with server via SSE/Initial Fetch
+  // 5. Tickets synced with Firestore across all devices / IPs / Netlify deployments
   useEffect(() => {
-    // Tickets are now synced directly via initial fetch and SSE events in applyServerDb
-    // Firestore listener for tickets removed to prevent empty collection state overwrites
+    const unsubscribe = onSnapshot(
+      doc(db, 'system_data', 'tickets_bundle'),
+      async (docSnap) => {
+        try {
+          if (!docSnap.exists()) return;
+          const data = docSnap.data();
+          if (Array.isArray(data?.tickets) && data.tickets.length > 0) {
+            const cleaned = data.tickets.map((t: Ticket) => ({
+              ...t,
+              kategori: cleanCategory(t.kategori),
+            }));
+            setTickets(cleaned);
+            safeStorage.setItem(STORAGE_KEYS.TICKETS, JSON.stringify(cleaned));
+          } else if (data?.chunkCount && data.chunkCount > 1) {
+            const promises = [];
+            for (let i = 0; i < data.chunkCount; i++) {
+              promises.push(getDoc(doc(db, 'system_data', `tickets_bundle_part_${i}`)));
+            }
+            const snaps = await Promise.all(promises);
+            let combined: Ticket[] = [];
+            for (const snap of snaps) {
+              if (snap.exists() && Array.isArray(snap.data()?.tickets)) {
+                combined = combined.concat(snap.data().tickets);
+              }
+            }
+            if (combined.length > 0) {
+              const cleaned = combined.map((t: Ticket) => ({
+                ...t,
+                kategori: cleanCategory(t.kategori),
+              }));
+              setTickets(cleaned);
+              safeStorage.setItem(STORAGE_KEYS.TICKETS, JSON.stringify(cleaned));
+            }
+          }
+        } catch (err: any) {
+          console.warn('Firestore tickets_bundle sync notice:', err?.message);
+        }
+      },
+      (error) => {
+        handleFirestoreError(error, 'onSnapshot', 'system_data/tickets_bundle');
+      }
+    );
+    return () => unsubscribe();
   }, []);
 
 
@@ -802,6 +947,50 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   useEffect(() => {
     safeStorage.setItem(STORAGE_KEYS.SHEET, JSON.stringify(sheetConfig));
   }, [sheetConfig]);
+
+  // Persist tickets bundle to Firestore for seamless Netlify, multi-device, and cross-IP access
+  const saveTicketsToFirestore = useCallback(async (nextTickets: Ticket[], syncMode: string = 'use_data') => {
+    if (firestoreQuotaExceededGlobal || !nextTickets || nextTickets.length === 0) return;
+    try {
+      const CHUNK_SIZE = 400;
+      if (nextTickets.length <= CHUNK_SIZE) {
+        await safeSetDoc(doc(db, 'system_data', 'tickets_bundle'), {
+          tickets: cleanFirestoreData(nextTickets),
+          totalCount: nextTickets.length,
+          updatedAt: formatJakartaTime(new Date()),
+          mode: syncMode,
+        });
+      } else {
+        const chunks: Ticket[][] = [];
+        for (let i = 0; i < nextTickets.length; i += CHUNK_SIZE) {
+          chunks.push(nextTickets.slice(i, i + CHUNK_SIZE));
+        }
+        await safeSetDoc(doc(db, 'system_data', 'tickets_bundle'), {
+          chunkCount: chunks.length,
+          totalCount: nextTickets.length,
+          updatedAt: formatJakartaTime(new Date()),
+          mode: syncMode,
+        });
+        for (let i = 0; i < chunks.length; i++) {
+          await safeSetDoc(doc(db, 'system_data', `tickets_bundle_part_${i}`), {
+            tickets: cleanFirestoreData(chunks[i]),
+            partIndex: i,
+            partCount: chunks.length,
+          });
+        }
+      }
+
+      // Also batch-set individual tickets for direct document queries
+      const sampleItems = nextTickets.slice(0, 100).map((t) => ({
+        path: 'tickets',
+        id: toSafeDocId(t.nomorTiket),
+        data: t,
+      }));
+      await batchSetDocs(sampleItems);
+    } catch (err) {
+      console.warn('Error saving tickets bundle to Firestore:', err);
+    }
+  }, []);
 
   // ==========================================
   // MULTI-IP, MULTI-DEVICE, REALTIME SERVER SYNC
@@ -1410,7 +1599,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
-  // Google Sheet & CSV Sync Handlers
   // Google Sheet & CSV/Excel Sync Handlers
   const syncGoogleSheet = async (
     customUrl?: string,
@@ -1426,7 +1614,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     onProgress?.(20, 'Menghubungkan ke Google Sheet...');
 
     try {
-      onProgress?.(35, 'Mengunduh data spreadsheet melalui proxy server...');
+      onProgress?.(35, 'Mengunduh data spreadsheet...');
 
       let rawData: string = '';
       let fetchError: string | null = null;
@@ -1466,7 +1654,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
       // 2. Direct browser fetch fallback
       if (!rawData) {
-        onProgress?.(50, 'Mencoba koneksi langsung ke webservice/spreadsheet...');
+        onProgress?.(45, 'Mencoba koneksi langsung ke webservice/spreadsheet...');
         try {
           const directRes = await fetch(targetUrl, {
             headers: { Accept: 'application/json, text/csv, text/plain, */*' },
@@ -1485,6 +1673,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           console.warn('Direct fetch notice:', directErr);
         }
 
+        // 3. Google Sheets Export format=csv and GViz fallbacks
         if (!rawData) {
           const sheetIdMatch =
             targetUrl.match(/\/spreadsheets(?:\/u\/\d+)?\/d\/([a-zA-Z0-9-_]+)/) ||
@@ -1494,10 +1683,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
           if (sheetIdMatch) {
             const sheetId = sheetIdMatch[1];
-            // Try official export?format=csv first to avoid GViz limits & gaps
+            onProgress?.(55, 'Mengakses endpoint ekspor resmi Google Sheets...');
             try {
               const controller = new AbortController();
-              const timeoutId = setTimeout(() => controller.abort(), 20000);
+              const timeoutId = setTimeout(() => controller.abort(), 15000);
               const expDirect = await fetch(
                 `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`,
                 { signal: controller.signal }
@@ -1520,7 +1709,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             if (!rawData) {
               try {
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 20000);
+                const timeoutId = setTimeout(() => controller.abort(), 15000);
                 const gvizDirect = await fetch(
                   `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&gid=${gid}&tq=${encodeURIComponent('select *')}`,
                   { signal: controller.signal }
@@ -1542,6 +1731,37 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             }
           }
         }
+
+        // 4. Public CORS Proxy Fallback (Crucial for Netlify & static hosts where Apps Script is blocked by CORS)
+        if (!rawData) {
+          onProgress?.(60, 'Mencoba koneksi CORS proxy untuk hosting statis/Netlify...');
+          const corsProxies = [
+            `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`,
+            `https://corsproxy.io/?url=${encodeURIComponent(targetUrl)}`,
+          ];
+          for (const proxyUrl of corsProxies) {
+            if (rawData) break;
+            try {
+              const controller = new AbortController();
+              const timeoutId = setTimeout(() => controller.abort(), 12000);
+              const pRes = await fetch(proxyUrl, { signal: controller.signal });
+              clearTimeout(timeoutId);
+              const pText = await pRes.text();
+              if (
+                pRes.ok &&
+                pText.trim() &&
+                !pText.trim().startsWith('<!DOCTYPE') &&
+                !pText.trim().startsWith('<html')
+              ) {
+                rawData = pText;
+                fetchError = null;
+                break;
+              }
+            } catch {
+              // try next
+            }
+          }
+        }
       }
 
       if (!rawData || !rawData.trim()) {
@@ -1560,11 +1780,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         );
       }
 
-      onProgress?.(85, `Menyinkronkan ${parsed.data.length} tiket ke database server & realtime stream...`);
+      onProgress?.(80, `Memproses ${parsed.data.length} tiket & memperbarui database...`);
 
-      // 1. Primary Sync: Persist directly to server backend database & broadcast to all connected devices/IPs
-      let addedCount = parsed.data.length;
-      let totalCount = parsed.data.length;
+      // 1. Authoritative Merge & Local State Update
+      const merged = mergeTicketsList(tickets, parsed.data, evaluations, mode);
+      setTickets(merged.nextTickets);
+      safeStorage.setItem(STORAGE_KEYS.TICKETS, JSON.stringify(merged.nextTickets));
+
+      // 2. Persist to Firestore across all devices and Netlify
+      onProgress?.(88, 'Menyimpan data ke Cloud Database Firestore...');
+      await saveTicketsToFirestore(merged.nextTickets, mode);
+
+      // 3. Sync to Backend Server (if running in full-stack mode)
       try {
         const serverSyncRes = await callServerApi('/sync-tickets', 'POST', {
           tickets: parsed.data,
@@ -1573,27 +1800,25 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         });
         if (serverSyncRes && serverSyncRes.success && serverSyncRes.db) {
           applyServerDb(serverSyncRes.db);
-          if (typeof serverSyncRes.addedCount === 'number') addedCount = serverSyncRes.addedCount;
-          if (typeof serverSyncRes.totalCount === 'number') totalCount = serverSyncRes.totalCount;
         }
       } catch (srvErr) {
-        console.warn('Server sync error fallback:', srvErr);
+        console.warn('Server sync notice (offline/Netlify mode):', srvErr);
       }
 
       onProgress?.(95, 'Memperbarui konfigurasi sheet & sinkronisasi status...');
 
-      const dates = parsed.data.map((t: Ticket) => t.tanggalTiket).filter(Boolean).sort();
+      const dates = merged.nextTickets.map((t: Ticket) => t.tanggalTiket).filter(Boolean).sort();
       const minDate = dates[0] || '';
       const maxDate = dates[dates.length - 1] || '';
       const computedDateRange = minDate && maxDate ? (minDate === maxDate ? minDate : `${minDate} s.d. ${maxDate}`) : 'Semua Periode';
 
-      const now = new Date().toISOString().replace('T', ' ').slice(0, 16);
-      const newConfig = {
+      const now = formatJakartaTime(new Date());
+      const newConfig: GoogleSheetConfig = {
         url: targetUrl,
         lastSyncedAt: now,
         autoSync: true,
-        totalSyncedRows: totalCount,
-        status: 'success' as const,
+        totalSyncedRows: merged.totalCount,
+        status: 'success',
         dateRange: computedDateRange,
       };
       setSheetConfig(newConfig);
@@ -1601,13 +1826,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       safeStorage.setItem(STORAGE_KEYS.SHEET, JSON.stringify(newConfig));
       safeSetDoc(doc(db, 'config', 'sheetConfig'), newConfig);
 
-      onProgress?.(100, `Sinkronisasi selesai! ${addedCount} data baru diproses (Total aktif: ${totalCount} tiket).`);
+      onProgress?.(100, `Sinkronisasi selesai! ${merged.addedCount} data baru diproses (Total aktif: ${merged.totalCount} tiket).`);
       return {
         success: true,
         message: mode === 'use_data'
-          ? `Sinkronisasi berhasil. Data baru diterapkan di server (${addedCount} pembaruan), data yang sudah disampling & dikalibrasi aman terjaga.`
-          : `Penambahan data berhasil. ${addedCount} tiket baru ditambahkan tanpa duplikasi, total aktif: ${totalCount} tiket.`,
-        count: totalCount,
+          ? `Sinkronisasi berhasil. Data baru diterapkan (${merged.addedCount} pembaruan), data yang sudah disampling & dikalibrasi aman terjaga.`
+          : `Penambahan data berhasil. ${merged.addedCount} tiket baru ditambahkan tanpa duplikasi, total aktif: ${merged.totalCount} tiket.`,
+        count: merged.totalCount,
       };
     } catch (err: any) {
       const errorMsg = err?.message || 'Terjadi kesalahan jaringan saat sinkronisasi.';
@@ -1632,12 +1857,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         throw new Error('Tidak ditemukan data baris tiket yang valid dalam berkas Excel ini.');
       }
 
-      onProgress?.(90, `Menyimpan ${parsed.data.length} tiket ke server database & stream realtime...`);
+      onProgress?.(85, `Memproses ${parsed.data.length} tiket & memperbarui database...`);
 
-      let addedCount = parsed.data.length;
-      let totalCount = parsed.data.length;
+      // 1. Authoritative Merge & Local State Update
+      const merged = mergeTicketsList(tickets, parsed.data, evaluations, 'use_data');
+      setTickets(merged.nextTickets);
+      safeStorage.setItem(STORAGE_KEYS.TICKETS, JSON.stringify(merged.nextTickets));
 
-      // Persist directly to server backend database & broadcast to all connected devices/IPs
+      // 2. Persist to Firestore across all devices and Netlify
+      onProgress?.(92, 'Menyimpan data ke Cloud Database Firestore...');
+      await saveTicketsToFirestore(merged.nextTickets, 'use_data');
+
+      // 3. Sync to Backend Server (if running)
       try {
         const serverSyncRes = await callServerApi('/sync-tickets', 'POST', {
           tickets: parsed.data,
@@ -1646,25 +1877,23 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         });
         if (serverSyncRes && serverSyncRes.success && serverSyncRes.db) {
           applyServerDb(serverSyncRes.db);
-          if (typeof serverSyncRes.addedCount === 'number') addedCount = serverSyncRes.addedCount;
-          if (typeof serverSyncRes.totalCount === 'number') totalCount = serverSyncRes.totalCount;
         }
       } catch (srvErr) {
-        console.warn('Server sync error fallback:', srvErr);
+        console.warn('Server sync notice (offline/Netlify mode):', srvErr);
       }
 
-      const dates = parsed.data.map((t: Ticket) => t.tanggalTiket).filter(Boolean).sort();
+      const dates = merged.nextTickets.map((t: Ticket) => t.tanggalTiket).filter(Boolean).sort();
       const minDate = dates[0] || '';
       const maxDate = dates[dates.length - 1] || '';
       const computedDateRange = minDate && maxDate ? (minDate === maxDate ? minDate : `${minDate} s.d. ${maxDate}`) : 'Semua Periode';
 
-      const now = new Date().toISOString().replace('T', ' ').slice(0, 16);
-      const newConfig = {
+      const now = formatJakartaTime(new Date());
+      const newConfig: GoogleSheetConfig = {
         url: `Berkas Excel: ${file.name}`,
         lastSyncedAt: now,
         autoSync: false,
-        totalSyncedRows: totalCount,
-        status: 'success' as const,
+        totalSyncedRows: merged.totalCount,
+        status: 'success',
         dateRange: computedDateRange,
       };
       setSheetConfig(newConfig);
@@ -1672,12 +1901,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       safeStorage.setItem(STORAGE_KEYS.SHEET, JSON.stringify(newConfig));
       safeSetDoc(doc(db, 'config', 'sheetConfig'), newConfig);
 
-      onProgress?.(100, `Impor selesai! ${addedCount} data baru ditambahkan (Total: ${totalCount} tiket).`);
+      onProgress?.(100, `Impor selesai! ${merged.addedCount} data baru ditambahkan (Total: ${merged.totalCount} tiket).`);
 
       return {
         success: true,
-        message: `Impor Excel berhasil. ${addedCount} data baru ditambahkan, catatan data sebelumnya tetap aman.`,
-        count: totalCount,
+        message: `Impor Excel berhasil. ${merged.addedCount} data baru ditambahkan, catatan data sebelumnya tetap aman.`,
+        count: merged.totalCount,
       };
     } catch (err: any) {
       const errorMsg = err?.message || 'Gagal memproses berkas Excel.';
@@ -1698,9 +1927,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const sampleCSV = generateSampleGoogleSheetCSV();
     const parsed = await parseCSV(sampleCSV);
 
-    onProgress?.(70, 'Memuat tiket ke database server...');
+    onProgress?.(70, 'Memuat tiket ke database...');
 
-    let totalCount = parsed.data.length;
+    // 1. Authoritative Merge & Local State Update
+    const merged = mergeTicketsList(tickets, parsed.data, evaluations, 'use_data');
+    setTickets(merged.nextTickets);
+    safeStorage.setItem(STORAGE_KEYS.TICKETS, JSON.stringify(merged.nextTickets));
+
+    // 2. Persist to Firestore across all devices and Netlify
+    await saveTicketsToFirestore(merged.nextTickets, 'use_data');
+
+    // 3. Sync to Backend Server (if running)
     try {
       const serverSyncRes = await callServerApi('/sync-tickets', 'POST', {
         tickets: parsed.data,
@@ -1709,23 +1946,22 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       });
       if (serverSyncRes && serverSyncRes.success && serverSyncRes.db) {
         applyServerDb(serverSyncRes.db);
-        if (typeof serverSyncRes.totalCount === 'number') totalCount = serverSyncRes.totalCount;
       }
     } catch (srvErr) {
-      console.warn('Server sync error fallback:', srvErr);
+      console.warn('Server sync notice (offline/Netlify mode):', srvErr);
     }
 
-    const dates = parsed.data.map((t: Ticket) => t.tanggalTiket).filter(Boolean).sort();
+    const dates = merged.nextTickets.map((t: Ticket) => t.tanggalTiket).filter(Boolean).sort();
     const minDate = dates[0] || '';
     const maxDate = dates[dates.length - 1] || '';
     const computedDateRange = minDate && maxDate ? (minDate === maxDate ? minDate : `${minDate} s.d. ${maxDate}`) : 'Semua Periode';
 
-    const newConfig = {
+    const newConfig: GoogleSheetConfig = {
       url: 'Simulasi Dataset Resmi BPJS',
-      lastSyncedAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
+      lastSyncedAt: formatJakartaTime(new Date()),
       autoSync: false,
-      totalSyncedRows: totalCount,
-      status: 'success' as const,
+      totalSyncedRows: merged.totalCount,
+      status: 'success',
       errorMessage: undefined,
       dateRange: computedDateRange,
     };
@@ -1734,12 +1970,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     safeStorage.setItem(STORAGE_KEYS.SHEET, JSON.stringify(newConfig));
     safeSetDoc(doc(db, 'config', 'sheetConfig'), newConfig);
 
-    onProgress?.(100, `Dataset sampel berhasil dimuat (${parsed.data.length} tiket).`);
+    onProgress?.(100, `Dataset sampel berhasil dimuat (${merged.totalCount} tiket aktif).`);
 
     return {
       success: true,
-      message: `Berhasil memuat dataset simulasi resmi BPJS (${parsed.data.length} tiket).`,
-      count: parsed.data.length,
+      message: `Berhasil memuat dataset simulasi resmi BPJS (${merged.totalCount} tiket aktif).`,
+      count: merged.totalCount,
     };
   };
 
@@ -1753,8 +1989,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (parsed.data.length === 0) {
         return { success: false, count: 0, error: 'Format CSV tidak valid atau baris kosong.' };
       }
-      onProgress?.(80, `Memvalidasi ${parsed.data.length} baris tiket & menyimpan ke database server...`);
+      onProgress?.(75, `Memvalidasi ${parsed.data.length} baris tiket & menyimpan ke database...`);
 
+      // 1. Authoritative Merge & Local State Update
+      const merged = mergeTicketsList(tickets, parsed.data, evaluations, 'append_data');
+      setTickets(merged.nextTickets);
+      safeStorage.setItem(STORAGE_KEYS.TICKETS, JSON.stringify(merged.nextTickets));
+
+      // 2. Persist to Firestore across all devices and Netlify
+      await saveTicketsToFirestore(merged.nextTickets, 'append_data');
+
+      // 3. Sync to Backend Server (if running)
       try {
         const syncRes = await callServerApi('/sync-tickets', 'POST', {
           tickets: parsed.data,
@@ -1764,11 +2009,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           applyServerDb(syncRes.db);
         }
       } catch (err) {
-        console.warn('CSV server sync error:', err);
+        console.warn('CSV server sync notice (offline/Netlify mode):', err);
       }
 
-      onProgress?.(100, `Berhasil mengimpor ${parsed.data.length} tiket.`);
-      return { success: true, count: parsed.data.length };
+      onProgress?.(100, `Berhasil mengimpor ${merged.addedCount} tiket baru (Total: ${merged.totalCount} tiket).`);
+      return { success: true, count: merged.totalCount };
     } catch (e: any) {
       return { success: false, count: 0, error: e?.message || 'Gagal memproses data CSV' };
     }
