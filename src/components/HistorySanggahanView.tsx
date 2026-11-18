@@ -167,49 +167,22 @@ export const HistorySanggahanView: React.FC = () => {
 
   // Export to Excel (.xlsx)
   const handleExportExcel = () => {
-    const activeIndicators = indicators && indicators.length > 0 ? indicators : INITIAL_INDICATORS;
+    const activeIndicators = indicators.length > 0 ? indicators : INITIAL_INDICATORS;
 
-    // Collect any extra indicator IDs that might exist in historical evaluations
-    const extraIndicatorIds: string[] = [];
-    const knownIndicatorIds = new Set(activeIndicators.map((ind) => ind.id));
-    filteredList.forEach((e) => {
-      const scoreSource =
-        e.keputusanAkhir?.finalScores && e.keputusanAkhir.finalScores.length > 0
-          ? e.keputusanAkhir.finalScores
-          : e.scores || [];
-      scoreSource.forEach((s) => {
-        if (s.indicatorId && !knownIndicatorIds.has(s.indicatorId)) {
-          knownIndicatorIds.add(s.indicatorId);
-          extraIndicatorIds.push(s.indicatorId);
-        }
-      });
-    });
-
-    // Build unique column headers for each indicator
+    // Build unique column headers strictly from currently existing indicators
     const usedLabels = new Set<string>();
-    const indicatorColumns = [
-      ...activeIndicators.map((ind) => {
-        const baseLabel = ind.nomorSOP
-          ? `Indikator #${ind.nomorSOP} - ${ind.nama} (${ind.bobot}%)`
-          : `Indikator - ${ind.nama} (${ind.bobot}%)`;
-        let label = baseLabel;
-        let counter = 2;
-        while (usedLabels.has(label)) {
-          label = `${baseLabel} [${counter++}]`;
-        }
-        usedLabels.add(label);
-        return { id: ind.id, label };
-      }),
-      ...extraIndicatorIds.map((id) => {
-        let label = `Indikator (${id})`;
-        let counter = 2;
-        while (usedLabels.has(label)) {
-          label = `Indikator (${id}) [${counter++}]`;
-        }
-        usedLabels.add(label);
-        return { id, label };
-      }),
-    ];
+    const indicatorColumns = activeIndicators.map((ind) => {
+      const baseLabel = ind.nomorSOP
+        ? `Indikator #${ind.nomorSOP} - ${ind.nama} (${ind.bobot}%)`
+        : `Indikator - ${ind.nama} (${ind.bobot}%)`;
+      let label = baseLabel;
+      let counter = 2;
+      while (usedLabels.has(label)) {
+        label = `${baseLabel} [${counter++}]`;
+      }
+      usedLabels.add(label);
+      return { id: ind.id, label };
+    });
 
     const dataToExport = filteredList.map((e) => {
       const scoreSource =
