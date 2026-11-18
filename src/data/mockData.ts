@@ -139,12 +139,27 @@ export const INITIAL_USERS: User[] = [
 ];
 
 export const DEFAULT_NILAI_OPTIONS: import('../types').IndicatorNilaiOption[] = [
-  { nilai: 'N/A', label: 'Not Applicable (Tidak Berlaku)', enabled: true, referensiKetentuan: 'Indikator tidak relevan atau tidak berlaku pada kasus tiket ini.' },
-  { nilai: '0', label: 'Tidak Sesuai / Tidak Dilakukan', enabled: true, referensiKetentuan: 'Prosedur atau standar pelayanan sama sekali tidak dilakukan.' },
-  { nilai: '1', label: 'Kurang Sesuai', enabled: true, referensiKetentuan: 'Dilakukan sebagian kecil atau kurang dari standar ketentuan pelayanan.' },
-  { nilai: '2', label: 'Cukup Sesuai', enabled: true, referensiKetentuan: 'Sebagian besar standar ketentuan terpenuhi dengan catatan minor.' },
-  { nilai: '3', label: 'Sangat Sesuai / Sempurna', enabled: true, referensiKetentuan: 'Seluruh standar ketentuan terpenuhi dengan sangat baik dan sempurna.' },
+  { nilai: 'N/A', label: 'Not Applicable (Tidak Berlaku)', enabled: true, referensiKetentuan: 'Indikator tidak relevan atau tidak berlaku pada kasus tiket ini.', persentase: 100 },
+  { nilai: '0', label: 'Tidak Sesuai / Tidak Dilakukan', enabled: true, referensiKetentuan: 'Prosedur atau standar pelayanan sama sekali tidak dilakukan.', persentase: 0 },
+  { nilai: '1', label: 'Kurang Sesuai', enabled: true, referensiKetentuan: 'Dilakukan sebagian kecil atau kurang dari standar ketentuan pelayanan.', persentase: 50 },
+  { nilai: '2', label: 'Cukup Sesuai', enabled: true, referensiKetentuan: 'Sebagian besar standar ketentuan terpenuhi dengan catatan minor.', persentase: 75 },
+  { nilai: '3', label: 'Sangat Sesuai / Sempurna', enabled: true, referensiKetentuan: 'Seluruh standar ketentuan terpenuhi dengan sangat baik dan sempurna.', persentase: 100 },
 ];
+
+export const getOptionPercentage = (opt?: { nilai: string; persentase?: number } | null): number => {
+  if (!opt) return 100;
+  if (typeof opt.persentase === 'number' && !isNaN(opt.persentase)) {
+    return Math.max(0, Math.min(100, Math.round(opt.persentase)));
+  }
+  switch (opt.nilai) {
+    case 'N/A': return 100;
+    case '0': return 0;
+    case '1': return 50;
+    case '2': return 75;
+    case '3': return 100;
+    default: return 100;
+  }
+};
 
 export const INITIAL_INDICATORS: Indicator[] = [
   { id: 'ind-1', nomorSOP: 1, nama: 'Salam Pembuka', bobot: 5, deskripsi: 'Petugas menyapa dengan sopan dan ramah di awal percakapan sesuai standar SOP.', skalaMin: 0, skalaMax: 100, pilihanNilai: DEFAULT_NILAI_OPTIONS },

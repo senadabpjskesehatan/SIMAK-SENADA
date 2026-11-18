@@ -34,6 +34,7 @@ export interface IndicatorNilaiOption {
   label: string;
   enabled: boolean;
   referensiKetentuan: string;
+  persentase?: number; // Besaran persentase nilai (0 - 100)
 }
 
 export interface Indicator {

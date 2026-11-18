@@ -255,12 +255,12 @@ export const QaRebuttalInboxView: React.FC = () => {
         </div>
       ) : (
         <div className="space-y-4">
-          {displayedRebuttals.map((item) => {
+          {displayedRebuttals.map((item, idx) => {
             const isAssignedToMe = !currentUser ? false : (item.qaId === currentUser.id || item.qaName.toLowerCase() === currentUser.name.toLowerCase());
 
             return (
               <div
-                key={item.id}
+                key={`qa-inbox-${item.id}-${idx}`}
                 className="bg-white rounded-xl border border-amber-200/90 shadow-2xs p-5 hover:border-amber-300 transition space-y-4"
               >
                 {/* Header */}
@@ -507,10 +507,10 @@ export const QaRebuttalInboxView: React.FC = () => {
                   </div>
 
                   <div className="space-y-2.5">
-                    {indicators.map((ind) => {
+                    {indicators.map((ind, idx) => {
                       const cur = adjustedScores[ind.id] ?? 80;
                       return (
-                        <div key={ind.id} className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                        <div key={`qa-adj-ind-${ind.id}-${idx}`} className="bg-slate-50 p-3 rounded-lg border border-slate-200">
                           <div className="flex items-center justify-between mb-1.5">
                             <span className="font-semibold text-slate-800">{ind.nama} (Bobot {ind.bobot}%)</span>
                             <div className="flex items-center gap-2">

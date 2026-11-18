@@ -400,8 +400,10 @@ export function deleteEvaluationsByPeriodInDb(period: string): {
  */
 export function updateIndicatorsInDb(indicators: Indicator[]): ServerDatabase {
   const db = loadServerDb();
-  db.indicators = indicators;
-  saveServerDb(db);
+  if (Array.isArray(indicators) && indicators.length > 0) {
+    db.indicators = indicators;
+    saveServerDb(db);
+  }
   return db;
 }
 

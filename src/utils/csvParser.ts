@@ -229,6 +229,27 @@ export function cleanCategory(val: any): string {
 }
 
 /**
+ * Ensures all tickets in a dataset have strictly unique, non-empty nomorTiket.
+ * If raw data has repeated numbers (e.g. date serial numbers or row indexes),
+ * appends an index suffix to guarantee uniqueness.
+ */
+export function ensureUniqueTicketNumbers(tickets: Ticket[]): Ticket[] {
+  const seen = new Map<string, number>();
+  return tickets.map((t, idx) => {
+    let num = String(t.nomorTiket || '').trim();
+    if (!num) {
+      num = `TKT-${new Date().getFullYear()}-${String(idx + 1).padStart(4, '0')}`;
+    }
+    const count = seen.get(num) || 0;
+    seen.set(num, count + 1);
+    if (count > 0) {
+      num = `${num}-${count + 1}`;
+    }
+    return { ...t, nomorTiket: num };
+  });
+}
+
+/**
  * Converts 2D array of rows (first row is headers) into structured Ticket list
  */
 export async function rowsToTickets(
@@ -370,7 +391,7 @@ export async function rowsToTickets(
   }
 
   return {
-    data: tickets,
+    data: ensureUniqueTicketNumbers(tickets),
     headers: rawHeaders,
     rawCount: Math.max(0, rows.length - startRow),
   };
@@ -433,7 +454,7 @@ export function objectsToTickets(
   }
 
   return {
-    data: tickets,
+    data: ensureUniqueTicketNumbers(tickets),
     headers: rawHeaders,
     rawCount: items.length,
   };

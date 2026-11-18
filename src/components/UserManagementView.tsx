@@ -443,8 +443,8 @@ export const UserManagementView: React.FC = () => {
               className="text-xs bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500 font-medium"
             >
               <option value="all">Semua Hak Akses ({users.length})</option>
-              {roleOptions.map((r) => (
-                <option key={r.role} value={r.role}>
+              {roleOptions.map((r, idx) => (
+                <option key={`usr-role-${r.role}-${idx}`} value={r.role}>
                   {r.label} ({users.filter((u) => u.role === r.role).length})
                 </option>
               ))}
@@ -460,8 +460,8 @@ export const UserManagementView: React.FC = () => {
               className="text-xs bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500 font-medium"
             >
               <option value="all">Semua Tim ({users.length})</option>
-              {teamOptions.map((t) => (
-                <option key={t} value={t}>
+              {teamOptions.map((t, idx) => (
+                <option key={`usr-team-${t}-${idx}`} value={t}>
                   {t} ({users.filter((u) => u.team === t).length})
                 </option>
               ))}
@@ -479,11 +479,11 @@ export const UserManagementView: React.FC = () => {
 
       {/* Role Counts Summary Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-        {roleOptions.map((ro) => {
+        {roleOptions.map((ro, idx) => {
           const count = users.filter((u) => u.role === ro.role).length;
           return (
             <div
-              key={ro.role}
+              key={`role-card-${ro.role}-${idx}`}
               onClick={() => {
                 setRoleFilter(roleFilter === ro.role ? 'all' : ro.role);
                 setCurrentPage(1);
@@ -533,7 +533,7 @@ export const UserManagementView: React.FC = () => {
                   const isCurrent = currentUser ? user.id === currentUser.id : false;
 
                   return (
-                    <tr key={user.id} className="hover:bg-slate-50 transition">
+                    <tr key={`usr-row-${user.id || user.username || 'usr'}-${idx}`} className="hover:bg-slate-50 transition">
                       <td className="py-3 px-4 text-center font-mono text-slate-400 font-semibold">
                         {startIndex + idx + 1}
                       </td>
@@ -652,7 +652,7 @@ export const UserManagementView: React.FC = () => {
                   ) {
                     return (
                       <button
-                        key={pageNum}
+                        key={`page-btn-${pageNum}`}
                         onClick={() => setCurrentPage(pageNum)}
                         className={`min-w-[28px] h-7 px-1.5 rounded text-xs font-bold transition ${
                           pageNum === validCurrentPage
@@ -666,7 +666,7 @@ export const UserManagementView: React.FC = () => {
                   }
                   if (pageNum === validCurrentPage - 2 || pageNum === validCurrentPage + 2) {
                     return (
-                      <span key={pageNum} className="text-slate-400 px-1 select-none">
+                      <span key={`page-dots-${pageNum}`} className="text-slate-400 px-1 select-none">
                         ...
                       </span>
                     );
@@ -853,8 +853,8 @@ export const UserManagementView: React.FC = () => {
                     onChange={(e) => setFormData({ ...formData, team: e.target.value })}
                     className="w-full p-2.5 rounded-lg border border-slate-300 bg-white font-bold text-slate-800 focus:ring-2 focus:ring-teal-500"
                   >
-                    {teamOptions.map((t) => (
-                      <option key={t} value={t}>
+                    {teamOptions.map((t, idx) => (
+                      <option key={`form-team-${t}-${idx}`} value={t}>
                         {t}
                       </option>
                     ))}

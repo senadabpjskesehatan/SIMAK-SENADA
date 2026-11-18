@@ -12,6 +12,8 @@ import {
   KeputusanAkhirData,
   CalibrationRecord,
   CalibrationFilterState,
+  IndicatorNilaiOption,
+  IndicatorNilaiKey,
 } from '../types';
 import {
   INITIAL_USERS,
@@ -20,6 +22,7 @@ import {
   INITIAL_EVALUATIONS,
   INITIAL_CALIBRATIONS,
   DEFAULT_NILAI_OPTIONS,
+  getOptionPercentage,
 } from '../data/mockData';
 import { parseCSV, parseExcelFile, generateSampleGoogleSheetCSV, cleanCategory } from '../utils/csvParser';
 import * as XLSX from 'xlsx';
@@ -186,7 +189,8 @@ interface AppContextType {
   indicators: Indicator[];
   addIndicator: (indicator: Omit<Indicator, 'id'>) => Promise<{ success: boolean; error?: string }> | void;
   updateIndicator: (id: string, updated: Partial<Indicator>) => Promise<{ success: boolean; error?: string }> | void;
-  updateMultipleIndicators: (updates: { id: string; bobot?: number; nama?: string; deskripsi?: string; nomorSOP?: number }[]) => Promise<{ success: boolean; error?: string }>;
+  updateMultipleIndicators: (updates: { id: string; bobot?: number; nama?: string; deskripsi?: string; nomorSOP?: number; pilihanNilai?: IndicatorNilaiOption[] }[]) => Promise<{ success: boolean; error?: string }>;
+  updateAllIndicatorsNilaiPercentages: (percentages: Record<IndicatorNilaiKey, number>, targetIndicatorIds?: string[]) => Promise<{ success: boolean; error?: string }>;
   applyStandardSopWeights: () => Promise<{ success: boolean; error?: string }>;
   deleteIndicator: (id: string) => Promise<{ success: boolean; error?: string }> | void;
   resetIndicators: () => Promise<{ success: boolean; error?: string }>;
@@ -1522,62 +1526,138 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const addIndicator = async (newInd: Omit<Indicator, 'id'>): Promise<{ success: boolean; error?: string }> => {
     const id = `IND-${Date.now().toString().slice(-6)}`;
     const indObj: Indicator = { ...newInd, id };
-    setIndicators((prev) => {
-      const next = [...prev, indObj];
-      safeStorage.setItem(STORAGE_KEYS.INDICATORS, JSON.stringify(next));
-      callServerApi('/indicators', 'POST', { indicators: next });
-      return next;
-    });
+    const current = indicators && indicators.length > 0 ? indicators : INITIAL_INDICATORS;
+    const next = [...current, indObj];
+    setIndicators(next);
+    safeStorage.setItem(STORAGE_KEYS.INDICATORS, JSON.stringify(next));
 
     try {
-      await safeSetDoc(doc(db, 'indicators', id), indObj);
-      return { success: true };
+      await callServerApi('/indicators', 'POST', { indicators: next });
+    } catch (srvErr) {
+      console.warn('Server add indicator error:', srvErr);
+    }
+
+    try {
+      safeSetDoc(doc(db, 'indicators', id), indObj);
     } catch (e: any) {
       console.warn('Firestore addIndicator deferred:', e);
-      return { success: true };
     }
+
+    return { success: true };
   };
 
   const updateIndicator = async (id: string, updated: Partial<Indicator>): Promise<{ success: boolean; error?: string }> => {
-    setIndicators((prev) => {
-      const next = prev.map((ind) => (ind.id === id ? { ...ind, ...updated } : ind));
-      safeStorage.setItem(STORAGE_KEYS.INDICATORS, JSON.stringify(next));
-      callServerApi('/indicators', 'POST', { indicators: next });
-      return next;
-    });
+    const current = indicators && indicators.length > 0 ? indicators : INITIAL_INDICATORS;
+    const next = current.map((ind) => (ind.id === id ? { ...ind, ...updated } : ind));
+    setIndicators(next);
+    safeStorage.setItem(STORAGE_KEYS.INDICATORS, JSON.stringify(next));
 
     try {
-      await safeSetDoc(doc(db, 'indicators', id), { ...updated, id }, { merge: true });
-      return { success: true };
+      await callServerApi('/indicators', 'POST', { indicators: next });
+    } catch (srvErr) {
+      console.warn('Server updateIndicator error:', srvErr);
+    }
+
+    try {
+      safeSetDoc(doc(db, 'indicators', id), { ...updated, id }, { merge: true });
     } catch (e: any) {
       console.warn('Firestore updateIndicator deferred:', e);
-      return { success: true };
     }
+
+    return { success: true };
   };
 
   const updateMultipleIndicators = async (
-    updates: { id: string; bobot?: number; nama?: string; deskripsi?: string; nomorSOP?: number }[]
+    updates: { id: string; bobot?: number; nama?: string; deskripsi?: string; nomorSOP?: number; pilihanNilai?: IndicatorNilaiOption[] }[]
   ): Promise<{ success: boolean; error?: string }> => {
     const updateMap = new Map(updates.map((u) => [u.id, u]));
-    setIndicators((prev) => {
-      const next = prev.map((ind) => {
-        const u = updateMap.get(ind.id);
-        return u ? { ...ind, ...u } : ind;
-      });
-      safeStorage.setItem(STORAGE_KEYS.INDICATORS, JSON.stringify(next));
-      callServerApi('/indicators', 'POST', { indicators: next });
-      return next;
+    const current = indicators && indicators.length > 0 ? indicators : INITIAL_INDICATORS;
+    const next = current.map((ind) => {
+      const u = updateMap.get(ind.id);
+      return u ? { ...ind, ...u } : ind;
     });
+    setIndicators(next);
+    safeStorage.setItem(STORAGE_KEYS.INDICATORS, JSON.stringify(next));
+
+    try {
+      await callServerApi('/indicators', 'POST', { indicators: next });
+    } catch (srvErr) {
+      console.warn('Server updateMultipleIndicators error:', srvErr);
+    }
 
     try {
       for (const u of updates) {
-        await safeSetDoc(doc(db, 'indicators', u.id), u, { merge: true });
+        safeSetDoc(doc(db, 'indicators', u.id), u, { merge: true });
       }
-      return { success: true };
     } catch (e: any) {
       console.warn('Firestore updateMultipleIndicators deferred:', e);
-      return { success: true };
     }
+
+    return { success: true };
+  };
+
+  const updateAllIndicatorsNilaiPercentages = async (
+    percentages: Record<IndicatorNilaiKey, number>,
+    targetIndicatorIds?: string[]
+  ): Promise<{ success: boolean; error?: string }> => {
+    const isTargeted = Array.isArray(targetIndicatorIds) && targetIndicatorIds.length > 0;
+    
+    const currentList = indicators && indicators.length > 0 ? indicators : INITIAL_INDICATORS;
+    const updatedList: Indicator[] = currentList.map((ind) => {
+      if (isTargeted && !targetIndicatorIds.includes(ind.id)) {
+        return ind;
+      }
+
+      const existingPilihan =
+        ind.pilihanNilai && ind.pilihanNilai.length > 0
+          ? ind.pilihanNilai
+          : DEFAULT_NILAI_OPTIONS;
+
+      const updatedPilihan = existingPilihan.map((opt) => {
+        const customVal = percentages[opt.nilai];
+        const newPct =
+          typeof customVal === 'number' && !isNaN(customVal)
+            ? Math.max(0, Math.min(100, Math.round(customVal)))
+            : getOptionPercentage(opt);
+        return {
+          ...opt,
+          persentase: newPct,
+        };
+      });
+
+      return {
+        ...ind,
+        pilihanNilai: updatedPilihan,
+      };
+    });
+
+    setIndicators(updatedList);
+    safeStorage.setItem(STORAGE_KEYS.INDICATORS, JSON.stringify(updatedList));
+
+    try {
+      await callServerApi('/indicators', 'POST', { indicators: updatedList });
+    } catch (srvErr) {
+      console.warn('Server update indicators error:', srvErr);
+    }
+
+    // Deferred background sync to Firestore
+    (async () => {
+      try {
+        for (const ind of updatedList) {
+          if (!isTargeted || targetIndicatorIds.includes(ind.id)) {
+            safeSetDoc(
+              doc(db, 'indicators', ind.id),
+              { pilihanNilai: ind.pilihanNilai },
+              { merge: true }
+            );
+          }
+        }
+      } catch (e: any) {
+        console.warn('updateAllIndicatorsNilaiPercentages Firestore deferred:', e);
+      }
+    })();
+
+    return { success: true };
   };
 
   const applyStandardSopWeights = async (): Promise<{ success: boolean; error?: string }> => {
@@ -1641,12 +1721,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (!id) return { success: false, error: 'ID indikator tidak valid' };
 
     const targetInd = indicators.find((i) => i.id === id);
-    setIndicators((prev) => {
-      const next = prev.filter((ind) => ind.id !== id);
-      safeStorage.setItem(STORAGE_KEYS.INDICATORS, JSON.stringify(next));
-      callServerApi('/indicators', 'POST', { indicators: next });
-      return next;
-    });
+    const next = indicators.filter((ind) => ind.id !== id);
+    setIndicators(next);
+    safeStorage.setItem(STORAGE_KEYS.INDICATORS, JSON.stringify(next));
+
+    try {
+      await callServerApi('/indicators', 'POST', { indicators: next });
+    } catch (srvErr) {
+      console.warn('Server delete indicator error:', srvErr);
+    }
 
     try {
       await deleteDoc(doc(db, 'indicators', toSafeDocId(id)));
@@ -2956,6 +3039,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         addIndicator,
         updateIndicator,
         updateMultipleIndicators,
+        updateAllIndicatorsNilaiPercentages,
         applyStandardSopWeights,
         deleteIndicator,
         resetIndicators,

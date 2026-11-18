@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { SamplingEvaluation } from '../types';
+import { INITIAL_INDICATORS } from '../data/mockData';
 import * as XLSX from 'xlsx';
 import {
   History,
@@ -166,28 +167,119 @@ export const HistorySanggahanView: React.FC = () => {
 
   // Export to Excel (.xlsx)
   const handleExportExcel = () => {
-    const dataToExport = filteredList.map((e) => ({
-      'Nomor Tiket': e.nomorTiket,
-      'Tanggal Sampling': e.tanggalSampling,
-      'Tanggal Tiket': e.ticket.tanggalTiket,
-      'Petugas': e.ticket.namaPetugas,
-      'Tim Petugas': e.petugasTeam || '-',
-      'Kategori': e.ticket.kategori,
-      'Pokok Masalah': e.ticket.pokokMasalah,
-      'Topik Masalah': e.ticket.topikMasalah || '-',
-      'Asesor QA': e.qaName,
-      'Nilai Awal QA': e.nilaiAwal,
-      'Catatan Awal QA': e.catatanAwalQA || '-',
-      'Ada Sanggahan': e.sanggahan ? 'Ya' : 'Tidak',
-      'Alasan Sanggahan': e.sanggahan?.alasanSanggahan || '-',
-      'Argumen Petugas': e.sanggahan?.argumenPetugas || '-',
-      'Status Putusan QA': e.keputusanAkhir?.statusPutusan || '-',
-      'Catatan Putusan QA': e.keputusanAkhir?.catatanPutusanQA || '-',
-      'Nilai Akhir Final': e.nilaiFinal,
-      'Status': e.status,
+    const activeIndicators = indicators && indicators.length > 0 ? indicators : INITIAL_INDICATORS;
+
+    // Collect any extra indicator IDs that might exist in historical evaluations
+    const extraIndicatorIds: string[] = [];
+    const knownIndicatorIds = new Set(activeIndicators.map((ind) => ind.id));
+    filteredList.forEach((e) => {
+      const scoreSource =
+        e.keputusanAkhir?.finalScores && e.keputusanAkhir.finalScores.length > 0
+          ? e.keputusanAkhir.finalScores
+          : e.scores || [];
+      scoreSource.forEach((s) => {
+        if (s.indicatorId && !knownIndicatorIds.has(s.indicatorId)) {
+          knownIndicatorIds.add(s.indicatorId);
+          extraIndicatorIds.push(s.indicatorId);
+        }
+      });
+    });
+
+    // Build unique column headers for each indicator
+    const usedLabels = new Set<string>();
+    const indicatorColumns = [
+      ...activeIndicators.map((ind) => {
+        const baseLabel = ind.nomorSOP
+          ? `Indikator #${ind.nomorSOP} - ${ind.nama} (${ind.bobot}%)`
+          : `Indikator - ${ind.nama} (${ind.bobot}%)`;
+        let label = baseLabel;
+        let counter = 2;
+        while (usedLabels.has(label)) {
+          label = `${baseLabel} [${counter++}]`;
+        }
+        usedLabels.add(label);
+        return { id: ind.id, label };
+      }),
+      ...extraIndicatorIds.map((id) => {
+        let label = `Indikator (${id})`;
+        let counter = 2;
+        while (usedLabels.has(label)) {
+          label = `Indikator (${id}) [${counter++}]`;
+        }
+        usedLabels.add(label);
+        return { id, label };
+      }),
+    ];
+
+    const dataToExport = filteredList.map((e) => {
+      const scoreSource =
+        e.keputusanAkhir?.finalScores && e.keputusanAkhir.finalScores.length > 0
+          ? e.keputusanAkhir.finalScores
+          : e.scores || [];
+      const scoreMap = new Map(scoreSource.map((s) => [s.indicatorId, s]));
+
+      const row: Record<string, string | number> = {
+        'Nomor Tiket': e.nomorTiket,
+        'Tanggal Sampling': e.tanggalSampling,
+        'Tanggal Tiket': e.ticket.tanggalTiket,
+        'Petugas': e.ticket.namaPetugas,
+        'Tim Petugas': e.petugasTeam || '-',
+        'Kategori': e.ticket.kategori,
+        'Pokok Masalah': e.ticket.pokokMasalah,
+        'Topik Masalah': e.ticket.topikMasalah || '-',
+        'Asesor QA': e.qaName,
+        'Nilai Awal QA': e.nilaiAwal,
+        'Catatan Awal QA': e.catatanAwalQA || '-',
+      };
+
+      // Kolom nilai per indikator (0 - 100)
+      indicatorColumns.forEach((col) => {
+        const found = scoreMap.get(col.id);
+        row[col.label] = found !== undefined ? found.score : '-';
+      });
+
+      row['Ada Sanggahan'] = e.sanggahan ? 'Ya' : 'Tidak';
+      row['Alasan Sanggahan'] = e.sanggahan?.alasanSanggahan || '-';
+      row['Argumen Petugas'] = e.sanggahan?.argumenPetugas || '-';
+      row['Status Putusan QA'] = e.keputusanAkhir?.statusPutusan || '-';
+      row['Catatan Putusan QA'] = e.keputusanAkhir?.catatanPutusanQA || '-';
+      row['Nilai Akhir Final'] = e.nilaiFinal;
+      row['Status'] = e.status;
+
+      return row;
+    });
+
+    const allHeaders = [
+      'Nomor Tiket',
+      'Tanggal Sampling',
+      'Tanggal Tiket',
+      'Petugas',
+      'Tim Petugas',
+      'Kategori',
+      'Pokok Masalah',
+      'Topik Masalah',
+      'Asesor QA',
+      'Nilai Awal QA',
+      'Catatan Awal QA',
+      ...indicatorColumns.map((col) => col.label),
+      'Ada Sanggahan',
+      'Alasan Sanggahan',
+      'Argumen Petugas',
+      'Status Putusan QA',
+      'Catatan Putusan QA',
+      'Nilai Akhir Final',
+      'Status',
+    ];
+
+    const worksheet =
+      dataToExport.length > 0
+        ? XLSX.utils.json_to_sheet(dataToExport, { header: allHeaders })
+        : XLSX.utils.aoa_to_sheet([allHeaders]);
+
+    worksheet['!cols'] = allHeaders.map((h) => ({
+      wch: Math.min(45, Math.max(h.length + 2, 14)),
     }));
 
-    const worksheet = XLSX.utils.json_to_sheet(dataToExport);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Rekap Mutu & Sanggahan');
     XLSX.writeFile(workbook, `rekap_mutu_dan_sanggahan_${new Date().toISOString().slice(0, 10)}.xlsx`);
@@ -341,8 +433,8 @@ export const HistorySanggahanView: React.FC = () => {
                 className="text-xs bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500 font-medium"
               >
                 <option value="all">Semua Petugas ({agentList.length})</option>
-                {agentList.map((ag) => (
-                  <option key={ag} value={ag}>
+                {agentList.map((ag, idx) => (
+                  <option key={`hist-ag-${ag}-${idx}`} value={ag}>
                     {ag}
                   </option>
                 ))}
@@ -356,7 +448,7 @@ export const HistorySanggahanView: React.FC = () => {
               className="text-xs bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500 font-medium"
             >
               <option value="all">Semua Bulan Sampling</option>
-              {samplingMonthList.map((m) => {
+              {samplingMonthList.map((m, idx) => {
                 const [year, month] = m.split('-');
                 const monthNames = [
                   '', 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
@@ -364,7 +456,7 @@ export const HistorySanggahanView: React.FC = () => {
                 ];
                 const monthName = monthNames[parseInt(month, 10)] || month;
                 return (
-                  <option key={m} value={m}>
+                  <option key={`hist-m-${m}-${idx}`} value={m}>
                     {monthName} {year}
                   </option>
                 );
@@ -398,14 +490,14 @@ export const HistorySanggahanView: React.FC = () => {
         </div>
       ) : (
         <div className="space-y-4">
-          {paginatedList.map((item) => {
+          {paginatedList.map((item, idx) => {
             const isExpanded = expandedId === item.id;
             const hasRebuttal = Boolean(item.sanggahan);
             const scoreChanged = item.nilaiFinal !== item.nilaiAwal;
 
             return (
               <div
-                key={item.id}
+                key={`history-sanggah-${item.id}-${idx}`}
                 className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden transition"
               >
                 {/* Main Card Header */}
@@ -521,10 +613,10 @@ export const HistorySanggahanView: React.FC = () => {
                             "{item.catatanAwalQA}"
                           </p>
                           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-2 border-t border-slate-100 text-[11px]">
-                            {item.scores.map((s) => {
+                            {item.scores.map((s, sIdx) => {
                               const ind = indicators.find((i) => i.id === s.indicatorId);
                               return (
-                                <div key={s.indicatorId} className="bg-slate-50 p-2 rounded border border-slate-100">
+                                <div key={`hist-score-${item.id}-${s.indicatorId}-${sIdx}`} className="bg-slate-50 p-2 rounded border border-slate-100">
                                   <span className="text-slate-500 truncate block">{ind?.nama || s.indicatorId}</span>
                                   <strong className="text-slate-800 text-xs">{s.score} / 100</strong>
                                 </div>

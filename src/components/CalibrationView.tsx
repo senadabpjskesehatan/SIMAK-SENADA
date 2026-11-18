@@ -638,8 +638,8 @@ export const CalibrationView: React.FC = () => {
                           (e.petugasTeam || '').toLowerCase().includes(q)
                         );
                       })
-                      .map((item) => (
-                        <tr key={item.id} className="hover:bg-slate-50/80 transition">
+                      .map((item, idx) => (
+                        <tr key={`cal-eval-${item.id}-${idx}`} className="hover:bg-slate-50/80 transition">
                           <td className="py-3 px-3 font-mono font-bold text-slate-900">
                             {item.nomorTiket}
                           </td>
@@ -837,11 +837,11 @@ export const CalibrationView: React.FC = () => {
                     </div>
 
                     <div className="space-y-3">
-                      {indicators.map((ind) => {
+                      {indicators.map((ind, idx) => {
                         const score = calibratorScores[ind.id] ?? 85;
                         const qaScore = selectedEvaluation.scores.find((s) => s.indicatorId === ind.id)?.score ?? '-';
                         return (
-                          <div key={ind.id} className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-2">
+                          <div key={`cal-ind-${ind.id}-${idx}`} className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-2">
                             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                               <div>
                                 <span className="font-bold text-slate-900">{ind.nama}</span>
@@ -988,9 +988,9 @@ export const CalibrationView: React.FC = () => {
                       >
                         Semua Hasil Kalibrasi Saya ({qaCalibrations.length})
                       </button>
-                      {qaCalibrators.map((cal) => (
+                      {qaCalibrators.map((cal, idx) => (
                         <button
-                          key={cal.id}
+                          key={`qa-cal-${cal.id}-${idx}`}
                           onClick={() => setHistoryCalibratorFilter(cal.id)}
                           className={`px-3 py-1 rounded-lg text-xs font-medium transition ${
                             historyCalibratorFilter === cal.id
@@ -1066,13 +1066,13 @@ export const CalibrationView: React.FC = () => {
             </div>
           ) : (
             <div className="space-y-3">
-              {filteredHistoryList.map((item) => {
+              {filteredHistoryList.map((item, idx) => {
                 const isHigh = item.persentaseKesesuaian >= 95;
                 const isMed = item.persentaseKesesuaian >= 85 && item.persentaseKesesuaian < 95;
 
                 return (
                   <div
-                    key={item.id}
+                    key={`cal-hist-${item.id}-${idx}`}
                     className="bg-white rounded-xl border border-slate-200 p-5 shadow-2xs hover:border-purple-200 transition space-y-3"
                   >
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
@@ -1191,12 +1191,12 @@ export const CalibrationView: React.FC = () => {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {indicators.map((ind) => {
+                        {indicators.map((ind, idx) => {
                           const qa = selectedHistoryItem.scoresQA.find((s) => s.indicatorId === ind.id)?.score ?? '-';
                           const cal = selectedHistoryItem.scoresKalibrasi.find((s) => s.indicatorId === ind.id)?.score ?? '-';
                           const gap = typeof qa === 'number' && typeof cal === 'number' ? Math.abs(qa - cal) : '-';
                           return (
-                            <tr key={ind.id}>
+                            <tr key={`cal-hist-ind-${ind.id}-${idx}`}>
                               <td className="py-2 px-3 font-medium text-slate-800">{ind.nama}</td>
                               <td className="py-2 px-3 text-center text-teal-700 font-bold">{qa}</td>
                               <td className="py-2 px-3 text-center text-purple-700 font-bold">{cal}</td>
@@ -1321,8 +1321,8 @@ export const CalibrationView: React.FC = () => {
                   className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 font-medium focus:ring-2 focus:ring-purple-500"
                 >
                   <option value="all">Semua Kategori</option>
-                  {filterOptions.kategori.map((k) => (
-                    <option key={k} value={k}>
+                  {filterOptions.kategori.map((k, idx) => (
+                    <option key={`cal-kat-${k}-${idx}`} value={k}>
                       {k}
                     </option>
                   ))}
@@ -1342,8 +1342,8 @@ export const CalibrationView: React.FC = () => {
                   className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 font-medium focus:ring-2 focus:ring-purple-500"
                 >
                   <option value="all">Semua Pokok Masalah</option>
-                  {filterOptions.pokok.map((pm) => (
-                    <option key={pm} value={pm}>
+                  {filterOptions.pokok.map((pm, idx) => (
+                    <option key={`cal-pm-${pm}-${idx}`} value={pm}>
                       {pm}
                     </option>
                   ))}
@@ -1363,8 +1363,8 @@ export const CalibrationView: React.FC = () => {
                   className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 font-medium focus:ring-2 focus:ring-purple-500"
                 >
                   <option value="all">Semua Topik Masalah</option>
-                  {filterOptions.topik.map((tm) => (
-                    <option key={tm} value={tm}>
+                  {filterOptions.topik.map((tm, idx) => (
+                    <option key={`cal-tm-${tm}-${idx}`} value={tm}>
                       {tm}
                     </option>
                   ))}
@@ -1455,8 +1455,8 @@ export const CalibrationView: React.FC = () => {
             </div>
 
             <div className="space-y-3 pt-2">
-              {indicatorAlignment.map((ind) => (
-                <div key={ind.id} className="space-y-1 text-xs">
+              {indicatorAlignment.map((ind, idx) => (
+                <div key={`cal-align-${ind.id}-${idx}`} className="space-y-1 text-xs">
                   <div className="flex items-center justify-between">
                     <span className="font-semibold text-slate-800">{ind.nama}</span>
                     <div className="flex items-center gap-2">
@@ -1512,8 +1512,8 @@ export const CalibrationView: React.FC = () => {
                       </td>
                     </tr>
                   ) : (
-                    dashboardList.map((c) => (
-                      <tr key={c.id} className="hover:bg-slate-50">
+                    dashboardList.map((c, idx) => (
+                      <tr key={`cal-dash-${c.id}-${idx}`} className="hover:bg-slate-50">
                         <td className="py-2.5 px-3 font-mono font-bold text-slate-900">{c.nomorTiket}</td>
                         <td className="py-2.5 px-3 font-medium text-slate-800">{c.ticket.namaPetugas}</td>
                         <td className="py-2.5 px-3 text-slate-600">{c.qaName}</td>

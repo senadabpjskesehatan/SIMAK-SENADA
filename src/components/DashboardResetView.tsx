@@ -107,8 +107,8 @@ export const DashboardResetView: React.FC = () => {
               className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3.5 py-2 text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500"
             >
               <option value="all">⚠️ Semua Periode (Semua Data Evaluasi)</option>
-              {periodList.map((p) => (
-                <option key={p} value={p}>
+              {periodList.map((p, idx) => (
+                <option key={`reset-p-${p}-${idx}`} value={p}>
                   Bulan {p} ({evaluations.filter(e => e.tanggalSampling?.startsWith(p)).length} Sampling)
                 </option>
               ))}

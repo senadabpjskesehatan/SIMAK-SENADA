@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { Indicator, IndicatorNilaiOption, IndicatorNilaiKey } from '../types';
-import { DEFAULT_NILAI_OPTIONS, INITIAL_INDICATORS } from '../data/mockData';
+import { DEFAULT_NILAI_OPTIONS, INITIAL_INDICATORS, getOptionPercentage } from '../data/mockData';
 import {
   Sliders,
   Plus,
@@ -21,6 +21,8 @@ import {
   Scale,
   Minus,
   Check,
+  Percent,
+  Settings2,
 } from 'lucide-react';
 
 export const IndicatorManagerView: React.FC = () => {
@@ -29,6 +31,7 @@ export const IndicatorManagerView: React.FC = () => {
     addIndicator,
     updateIndicator,
     updateMultipleIndicators,
+    updateAllIndicatorsNilaiPercentages,
     applyStandardSopWeights,
     deleteIndicator,
     resetIndicators,
@@ -113,6 +116,99 @@ export const IndicatorManagerView: React.FC = () => {
     setEditingIndicator({ ...editingIndicator, pilihanNilai: updated });
   };
 
+  // Percentage setting modal state (N/A, 0, 1, 2, 3 antara 0 - 100%)
+  const [isPercentageModalOpen, setIsPercentageModalOpen] = useState(false);
+  const [isSavingPercentages, setIsSavingPercentages] = useState(false);
+  const [percentageValues, setPercentageValues] = useState<Record<IndicatorNilaiKey, number>>({
+    'N/A': 100,
+    '0': 0,
+    '1': 50,
+    '2': 75,
+    '3': 100,
+  });
+  const [applyPercentagesToAll, setApplyPercentagesToAll] = useState(true);
+  const [selectedIndicatorIdsForPercentage, setSelectedIndicatorIdsForPercentage] = useState<string[]>([]);
+
+  const handleOpenPercentageModal = (indId?: string) => {
+    const sourceInd = indId ? indicators.find((i) => i.id === indId) : indicators[0];
+    const initialValues: Record<IndicatorNilaiKey, number> = {
+      'N/A': 100,
+      '0': 0,
+      '1': 50,
+      '2': 75,
+      '3': 100,
+    };
+    if (sourceInd?.pilihanNilai) {
+      sourceInd.pilihanNilai.forEach((p) => {
+        initialValues[p.nilai] = getOptionPercentage(p);
+      });
+    }
+    setPercentageValues(initialValues);
+    if (indId) {
+      setApplyPercentagesToAll(false);
+      setSelectedIndicatorIdsForPercentage([indId]);
+    } else {
+      setApplyPercentagesToAll(true);
+      setSelectedIndicatorIdsForPercentage(indicators.map((i) => i.id));
+    }
+    setIsPercentageModalOpen(true);
+  };
+
+  const handleApplyPresetPercentages = (preset: 'standard' | 'linear' | 'strict' | 'flexible') => {
+    switch (preset) {
+      case 'standard':
+        setPercentageValues({ 'N/A': 100, '0': 0, '1': 50, '2': 75, '3': 100 });
+        break;
+      case 'linear':
+        setPercentageValues({ 'N/A': 100, '0': 0, '1': 33, '2': 67, '3': 100 });
+        break;
+      case 'strict':
+        setPercentageValues({ 'N/A': 100, '0': 0, '1': 25, '2': 60, '3': 100 });
+        break;
+      case 'flexible':
+        setPercentageValues({ 'N/A': 100, '0': 0, '1': 40, '2': 80, '3': 100 });
+        break;
+    }
+  };
+
+  const handleSavePercentageSettings = async () => {
+    setIsSavingPercentages(true);
+    try {
+      const targetIds = applyPercentagesToAll ? undefined : selectedIndicatorIdsForPercentage;
+      const count = targetIds ? targetIds.length : indicators.length;
+      
+      // Close modal immediately and show confirmation toast for instant feedback
+      setIsPercentageModalOpen(false);
+      showToast(`Besaran persentase nilai (N/A, 0, 1, 2, 3) berhasil diterapkan ke ${count} indikator.`);
+
+      const res = await updateAllIndicatorsNilaiPercentages(percentageValues, targetIds);
+      if (res && res.success === false) {
+        showToast(`Catatan server: ${res.error || 'Terjadi keterlambatan sinkronisasi'}`);
+      }
+    } catch (err: any) {
+      showToast(`Gagal menyimpan persentase: ${err?.message || 'Kesalahan sistem'}`);
+    } finally {
+      setIsSavingPercentages(false);
+      setIsPercentageModalOpen(false);
+    }
+  };
+
+  const handleUpdateEditNilaiPersentase = (nilaiKey: IndicatorNilaiKey, persentase: number) => {
+    if (!editingIndicator) return;
+    const safePct = Math.max(0, Math.min(100, isNaN(persentase) ? 0 : Math.round(persentase)));
+    const updated = (editingIndicator.pilihanNilai || DEFAULT_NILAI_OPTIONS).map((opt) =>
+      opt.nilai === nilaiKey ? { ...opt, persentase: safePct } : opt
+    );
+    setEditingIndicator({ ...editingIndicator, pilihanNilai: updated });
+  };
+
+  const handleUpdateNewNilaiPersentase = (nilaiKey: IndicatorNilaiKey, persentase: number) => {
+    const safePct = Math.max(0, Math.min(100, isNaN(persentase) ? 0 : Math.round(persentase)));
+    setNewPilihanNilai((prev) =>
+      prev.map((opt) => (opt.nilai === nilaiKey ? { ...opt, persentase: safePct } : opt))
+    );
+  };
+
   const handleToggleNewNilaiOption = (nilaiKey: IndicatorNilaiKey, enabled: boolean) => {
     setNewPilihanNilai((prev) =>
       prev.map((opt) => (opt.nilai === nilaiKey ? { ...opt, enabled } : opt))
@@ -140,16 +236,24 @@ export const IndicatorManagerView: React.FC = () => {
       return;
     }
 
-    await updateIndicator(editingIndicator.id, {
-      nama: editingIndicator.nama.trim(),
+    const idToUpdate = editingIndicator.id;
+    const nameToUpdate = editingIndicator.nama.trim();
+    const dataToUpdate = {
+      nama: nameToUpdate,
       nomorSOP: Number(editingIndicator.nomorSOP) || undefined,
       bobot: Number(editingIndicator.bobot) || 0,
       deskripsi: editingIndicator.deskripsi.trim(),
       pilihanNilai: editingIndicator.pilihanNilai,
-    });
+    };
 
     setEditingIndicator(null);
-    showToast(`Indikator "${editingIndicator.nama}" berhasil diperbarui.`);
+    showToast(`Indikator "${nameToUpdate}" berhasil diperbarui.`);
+
+    try {
+      await updateIndicator(idToUpdate, dataToUpdate);
+    } catch (err: any) {
+      console.warn('Error saving edit:', err);
+    }
   };
 
   const handleCreateNew = async (e: React.FormEvent) => {
@@ -172,7 +276,7 @@ export const IndicatorManagerView: React.FC = () => {
       return;
     }
 
-    await addIndicator({
+    const newIndData = {
       nama: newNama.trim(),
       nomorSOP: typeof newNomorSOP === 'number' ? newNomorSOP : undefined,
       bobot: Number(newBobot),
@@ -180,15 +284,17 @@ export const IndicatorManagerView: React.FC = () => {
       skalaMin: 0,
       skalaMax: 100,
       pilihanNilai: newPilihanNilai,
-    });
+    };
 
+    setIsCreating(false);
     setNewNama('');
     setNewNomorSOP('');
     setNewBobot(10);
     setNewDeskripsi('');
     setNewPilihanNilai(DEFAULT_NILAI_OPTIONS.map((opt) => ({ ...opt })));
-    setIsCreating(false);
-    showToast(`Indikator baru berhasil ditambahkan.`);
+    showToast(`Indikator baru "${newIndData.nama}" berhasil ditambahkan.`);
+
+    await addIndicator(newIndData);
   };
 
   const handleDelete = (ind: Indicator) => {
@@ -311,6 +417,16 @@ export const IndicatorManagerView: React.FC = () => {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => handleOpenPercentageModal()}
+              className="px-3.5 py-2 bg-indigo-700 hover:bg-indigo-800 text-white rounded-lg text-xs font-bold shadow-xs flex items-center gap-1.5 transition cursor-pointer"
+              title="Atur besaran persentase nilai N/A, 0, 1, 2, 3 (rentang 0 - 100%)"
+            >
+              <Percent className="w-4 h-4" />
+              Setting Persentase Nilai (N/A, 0, 1, 2, 3)
+            </button>
+
             <button
               onClick={handleApplyOfficialStandardSOP}
               className="px-3.5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-bold shadow-xs flex items-center gap-1.5 transition"
@@ -436,7 +552,7 @@ export const IndicatorManagerView: React.FC = () => {
                   {indicators.map((ind, idx) => {
                     const sopNum = ind.nomorSOP ?? idx + 1;
                     return (
-                      <tr key={ind.id} className="hover:bg-teal-50/30 transition">
+                      <tr key={`ind-row-${ind.id}-${idx}`} className="hover:bg-teal-50/30 transition">
                         <td className="px-3.5 py-2.5 text-center font-extrabold text-teal-700">
                           <span className="inline-block w-7 h-7 rounded-lg bg-teal-50 border border-teal-200 leading-7 text-xs">
                             {sopNum}
@@ -659,9 +775,9 @@ export const IndicatorManagerView: React.FC = () => {
               </div>
 
               <div className="space-y-3 pt-1">
-                {newPilihanNilai.map((opt) => (
+                {newPilihanNilai.map((opt, idx) => (
                   <div
-                    key={opt.nilai}
+                    key={`new-opt-${opt.nilai}-${idx}`}
                     className={`p-3 rounded-xl border transition ${
                       opt.enabled
                         ? 'bg-white border-slate-300 shadow-2xs'
@@ -691,17 +807,50 @@ export const IndicatorManagerView: React.FC = () => {
                     </div>
 
                     {opt.enabled && (
-                      <div className="mt-2.5 pl-6">
-                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                          Nilai Referensi Ketentuan (Deskripsi Panduan Nilai {opt.nilai}):
-                        </label>
-                        <input
-                          type="text"
-                          value={opt.referensiKetentuan}
-                          onChange={(e) => handleUpdateNewNilaiReferensi(opt.nilai, e.target.value)}
-                          placeholder="Masukkan kriteria panduan pemberian nilai ini..."
-                          className="w-full p-2 text-xs rounded-lg border border-slate-200 bg-slate-50 focus:bg-white focus:ring-1 focus:ring-teal-500"
-                        />
+                      <div className="mt-2.5 pl-6 space-y-2">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-indigo-50/70 p-2.5 rounded-lg border border-indigo-100">
+                          <div className="flex items-center gap-1.5">
+                            <Percent className="w-3.5 h-3.5 text-indigo-700" />
+                            <span className="text-[11px] font-bold text-slate-700">
+                              Besaran Persentase Nilai {opt.nilai} (0 - 100%):
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="range"
+                              min={0}
+                              max={100}
+                              step={1}
+                              value={opt.persentase ?? getOptionPercentage(opt)}
+                              onChange={(e) => handleUpdateNewNilaiPersentase(opt.nilai, Number(e.target.value))}
+                              className="w-24 accent-indigo-600 cursor-pointer"
+                            />
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="number"
+                                min={0}
+                                max={100}
+                                value={opt.persentase ?? getOptionPercentage(opt)}
+                                onChange={(e) => handleUpdateNewNilaiPersentase(opt.nilai, Number(e.target.value))}
+                                className="w-14 p-1 text-center font-bold text-xs rounded border border-slate-300 bg-white"
+                              />
+                              <span className="font-bold text-slate-600 text-xs">%</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                            Nilai Referensi Ketentuan (Deskripsi Panduan Nilai {opt.nilai}):
+                          </label>
+                          <input
+                            type="text"
+                            value={opt.referensiKetentuan}
+                            onChange={(e) => handleUpdateNewNilaiReferensi(opt.nilai, e.target.value)}
+                            placeholder="Masukkan kriteria panduan pemberian nilai ini..."
+                            className="w-full p-2 text-xs rounded-lg border border-slate-200 bg-slate-50 focus:bg-white focus:ring-1 focus:ring-teal-500"
+                          />
+                        </div>
                       </div>
                     )}
                   </div>
@@ -842,9 +991,9 @@ export const IndicatorManagerView: React.FC = () => {
                 </div>
 
                 <div className="space-y-3 pt-1">
-                  {(editingIndicator.pilihanNilai || DEFAULT_NILAI_OPTIONS).map((opt) => (
+                  {(editingIndicator.pilihanNilai || DEFAULT_NILAI_OPTIONS).map((opt, idx) => (
                     <div
-                      key={opt.nilai}
+                      key={`edit-opt-${opt.nilai}-${idx}`}
                       className={`p-3 rounded-xl border transition ${
                         opt.enabled
                           ? 'bg-white border-slate-300 shadow-2xs'
@@ -876,19 +1025,52 @@ export const IndicatorManagerView: React.FC = () => {
                       </div>
 
                       {opt.enabled && (
-                        <div className="mt-2.5 pl-6">
-                          <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                            Nilai Referensi Ketentuan untuk Nilai {opt.nilai}:
-                          </label>
-                          <input
-                            type="text"
-                            value={opt.referensiKetentuan}
-                            onChange={(e) =>
-                              handleUpdateEditNilaiReferensi(opt.nilai, e.target.value)
-                            }
-                            placeholder="Deskripsi kriteria panduan SOP untuk nilai ini..."
-                            className="w-full p-2 text-xs rounded-lg border border-slate-200 bg-slate-50 focus:bg-white focus:ring-1 focus:ring-teal-500"
-                          />
+                        <div className="mt-2.5 pl-6 space-y-2">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-indigo-50/70 p-2.5 rounded-lg border border-indigo-100">
+                            <div className="flex items-center gap-1.5">
+                              <Percent className="w-3.5 h-3.5 text-indigo-700" />
+                              <span className="text-[11px] font-bold text-slate-700">
+                                Besaran Persentase Nilai {opt.nilai} (0 - 100%):
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="range"
+                                min={0}
+                                max={100}
+                                step={1}
+                                value={opt.persentase ?? getOptionPercentage(opt)}
+                                onChange={(e) => handleUpdateEditNilaiPersentase(opt.nilai, Number(e.target.value))}
+                                className="w-24 accent-indigo-600 cursor-pointer"
+                              />
+                              <div className="flex items-center gap-1">
+                                <input
+                                  type="number"
+                                  min={0}
+                                  max={100}
+                                  value={opt.persentase ?? getOptionPercentage(opt)}
+                                  onChange={(e) => handleUpdateEditNilaiPersentase(opt.nilai, Number(e.target.value))}
+                                  className="w-14 p-1 text-center font-bold text-xs rounded border border-slate-300 bg-white"
+                                />
+                                <span className="font-bold text-slate-600 text-xs">%</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                              Nilai Referensi Ketentuan untuk Nilai {opt.nilai}:
+                            </label>
+                            <input
+                              type="text"
+                              value={opt.referensiKetentuan}
+                              onChange={(e) =>
+                                handleUpdateEditNilaiReferensi(opt.nilai, e.target.value)
+                              }
+                              placeholder="Deskripsi kriteria panduan SOP untuk nilai ini..."
+                              className="w-full p-2 text-xs rounded-lg border border-slate-200 bg-slate-50 focus:bg-white focus:ring-1 focus:ring-teal-500"
+                            />
+                          </div>
                         </div>
                       )}
                     </div>
@@ -930,7 +1112,7 @@ export const IndicatorManagerView: React.FC = () => {
 
           return (
             <div
-              key={ind.id}
+              key={`ind-card-${ind.id}-${idx}`}
               className="bg-white rounded-xl border border-slate-200 p-5 shadow-2xs hover:border-teal-300 transition flex flex-col justify-between space-y-4"
             >
               <div className="space-y-3">
@@ -1017,18 +1199,27 @@ export const IndicatorManagerView: React.FC = () => {
 
                   {/* Checklist chips representation */}
                   <div className="flex flex-wrap items-center gap-1.5">
-                    {pilihanNilai.map((opt) => (
+                    {pilihanNilai.map((opt, oIdx) => (
                       <span
-                        key={opt.nilai}
+                        key={`card-pill-${ind.id}-${opt.nilai}-${oIdx}`}
                         className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold border ${
                           opt.enabled
                             ? getNilaiBadgeColor(opt.nilai)
                             : 'bg-slate-50 text-slate-400 border-slate-200 line-through opacity-50'
                         }`}
-                        title={opt.enabled ? opt.referensiKetentuan : 'Nilai tidak diceklist/nonaktif'}
+                        title={
+                          opt.enabled
+                            ? `${opt.label} • Besaran Skor: ${getOptionPercentage(opt)}%`
+                            : 'Nilai tidak diceklist/nonaktif'
+                        }
                       >
                         {opt.enabled && <span className="text-[10px]">✓</span>}
                         <span>{opt.nilai}</span>
+                        {opt.enabled && (
+                          <span className="font-extrabold text-[10px] opacity-90">
+                            ({getOptionPercentage(opt)}%)
+                          </span>
+                        )}
                       </span>
                     ))}
                   </div>
@@ -1036,12 +1227,13 @@ export const IndicatorManagerView: React.FC = () => {
                   {/* Nilai Referensi Ketentuan detail list */}
                   {isExpanded && (
                     <div className="mt-3 pt-3 border-t border-slate-100 space-y-2 animate-in fade-in">
-                      <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                        Nilai Referensi Ketentuan:
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between">
+                        <span>Nilai Referensi Ketentuan:</span>
+                        <span>Besaran Persentase</span>
                       </div>
-                      {enabledNilaiList.map((opt) => (
+                      {enabledNilaiList.map((opt, eIdx) => (
                         <div
-                          key={opt.nilai}
+                          key={`card-ref-${ind.id}-${opt.nilai}-${eIdx}`}
                           className="bg-slate-50 rounded-lg p-2.5 border border-slate-100 text-xs flex items-start gap-2"
                         >
                           <span
@@ -1052,9 +1244,14 @@ export const IndicatorManagerView: React.FC = () => {
                             {opt.nilai}
                           </span>
                           <div className="flex-1">
-                            <span className="font-semibold text-[11px] text-slate-800 block">
-                              {opt.label}
-                            </span>
+                            <div className="flex items-center justify-between">
+                              <span className="font-semibold text-[11px] text-slate-800">
+                                {opt.label}
+                              </span>
+                              <span className="font-bold text-[10px] text-indigo-800 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded">
+                                {getOptionPercentage(opt)}%
+                              </span>
+                            </div>
                             <p className="text-[11px] text-slate-600 mt-0.5 leading-relaxed">
                               {opt.referensiKetentuan || 'Belum ada deskripsi referensi.'}
                             </p>
@@ -1072,7 +1269,16 @@ export const IndicatorManagerView: React.FC = () => {
                   Bobot {ind.bobot}% dari 100%
                 </span>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => handleOpenPercentageModal(ind.id)}
+                    className="px-2 py-1.5 rounded-lg border border-indigo-200 bg-indigo-50/60 hover:bg-indigo-100 text-indigo-800 font-semibold text-[11px] flex items-center gap-1 transition cursor-pointer"
+                    title={`Setting besaran persentase nilai (N/A, 0, 1, 2, 3) untuk ${ind.nama}`}
+                  >
+                    <Percent className="w-3 h-3 text-indigo-600" />
+                    Atur %
+                  </button>
                   <button
                     type="button"
                     onClick={() => handleStartEdit(ind)}
@@ -1229,6 +1435,313 @@ export const IndicatorManagerView: React.FC = () => {
                 >
                   <RotateCcw className={`w-3.5 h-3.5 ${isResettingSOP ? 'animate-spin' : ''}`} />
                   {isResettingSOP ? 'Mereset ke Server...' : 'Ya, Terapkan Reset SOP'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Global & Per-Indicator Nilai Percentage Settings Modal */}
+      {isPercentageModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto animate-in fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full border border-slate-200 overflow-hidden my-6">
+            <div className="bg-indigo-900 px-6 py-4 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <span className="p-1.5 rounded-lg bg-indigo-800 text-indigo-300">
+                  <Percent className="w-5 h-5" />
+                </span>
+                <div>
+                  <h3 className="text-sm font-bold">
+                    Setting Besaran Persentase Nilai (N/A, 0, 1, 2, 3)
+                  </h3>
+                  <p className="text-[11px] text-indigo-200">
+                    Konfigurasi rentang persentase skor capaian 0% - 100% untuk setiap tingkatan nilai mutu
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsPercentageModalOpen(false)}
+                disabled={isSavingPercentages}
+                className="p-1 rounded text-indigo-300 hover:text-white transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-5 text-xs max-h-[82vh] overflow-y-auto">
+              {/* Presets Row */}
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-slate-800 text-[11px] flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                    Pilihan Skala Baku Cepat (Preset Otomatis):
+                  </span>
+                  <span className="text-[10px] text-slate-500">Klik untuk menerapkan pola</span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleApplyPresetPercentages('standard')}
+                    className="p-2 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 hover:bg-indigo-50/50 text-left transition cursor-pointer"
+                  >
+                    <div className="font-bold text-slate-800 text-[11px]">Standar BPJS</div>
+                    <div className="text-[10px] text-indigo-700 font-semibold mt-0.5">
+                      0 • 50 • 75 • 100%
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleApplyPresetPercentages('linear')}
+                    className="p-2 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 hover:bg-indigo-50/50 text-left transition cursor-pointer"
+                  >
+                    <div className="font-bold text-slate-800 text-[11px]">Linear 1/3</div>
+                    <div className="text-[10px] text-indigo-700 font-semibold mt-0.5">
+                      0 • 33 • 67 • 100%
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleApplyPresetPercentages('strict')}
+                    className="p-2 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 hover:bg-indigo-50/50 text-left transition cursor-pointer"
+                  >
+                    <div className="font-bold text-slate-800 text-[11px]">Skala Ketat</div>
+                    <div className="text-[10px] text-indigo-700 font-semibold mt-0.5">
+                      0 • 25 • 60 • 100%
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleApplyPresetPercentages('flexible')}
+                    className="p-2 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 hover:bg-indigo-50/50 text-left transition cursor-pointer"
+                  >
+                    <div className="font-bold text-slate-800 text-[11px]">Skala Fleksibel</div>
+                    <div className="text-[10px] text-indigo-700 font-semibold mt-0.5">
+                      0 • 40 • 80 • 100%
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Individual Nilai Slider Cards */}
+              <div className="space-y-3">
+                <div className="text-[11px] font-bold uppercase tracking-wider text-slate-600 flex items-center justify-between">
+                  <span>Atur Besaran Persentase Masing-Masing Nilai (0 - 100%):</span>
+                  <span className="text-[10px] text-slate-400">Rentang: 0 s/d 100%</span>
+                </div>
+
+                {(['N/A', '0', '1', '2', '3'] as IndicatorNilaiKey[]).map((key, kIdx) => {
+                  const currentValue = percentageValues[key] ?? 100;
+                  const labelMap: Record<IndicatorNilaiKey, { title: string; desc: string }> = {
+                    'N/A': {
+                      title: 'Not Applicable (Tidak Berlaku)',
+                      desc: 'Diperuntukkan jika indikator tidak relevan/tidak berlaku pada tiket ini (standar 100% agar tidak mengurangi nilai petugas, atau dapat diset 0-100%).',
+                    },
+                    '0': {
+                      title: 'Tidak Sesuai / Tidak Dilakukan',
+                      desc: 'Prosedur atau standar pelayanan sama sekali tidak dijalankan.',
+                    },
+                    '1': {
+                      title: 'Kurang Sesuai',
+                      desc: 'Dilakukan sebagian kecil atau kurang dari standar ketentuan pelayanan.',
+                    },
+                    '2': {
+                      title: 'Cukup Sesuai',
+                      desc: 'Sebagian besar standar ketentuan terpenuhi dengan catatan minor.',
+                    },
+                    '3': {
+                      title: 'Sangat Sesuai / Sempurna',
+                      desc: 'Seluruh standar ketentuan terpenuhi dengan sangat baik dan optimal.',
+                    },
+                  };
+
+                  const quickPills: Record<IndicatorNilaiKey, number[]> = {
+                    'N/A': [0, 50, 100],
+                    '0': [0, 10, 20],
+                    '1': [25, 33, 50],
+                    '2': [60, 67, 75, 80],
+                    '3': [85, 90, 100],
+                  };
+
+                  return (
+                    <div
+                      key={`modal-pct-${key}-${kIdx}`}
+                      className="p-3.5 rounded-xl border border-slate-200 bg-white hover:border-indigo-300 transition shadow-2xs space-y-2.5"
+                    >
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`px-2.5 py-1 rounded-md text-xs font-bold border ${getNilaiBadgeColor(
+                              key
+                            )}`}
+                          >
+                            Nilai: {key}
+                          </span>
+                          <div>
+                            <span className="font-bold text-xs text-slate-900 block">
+                              {labelMap[key].title}
+                            </span>
+                            <span className="text-[10px] text-slate-500">
+                              {labelMap[key].desc}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Direct input and percentage display */}
+                        <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+                          <input
+                            type="number"
+                            min={0}
+                            max={100}
+                            value={currentValue}
+                            onChange={(e) => {
+                              const val = Math.max(0, Math.min(100, Number(e.target.value) || 0));
+                              setPercentageValues((prev) => ({ ...prev, [key]: val }));
+                            }}
+                            className="w-16 p-1.5 text-center font-extrabold text-sm rounded-lg border border-slate-300 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500"
+                          />
+                          <span className="font-bold text-slate-600 text-sm">%</span>
+                        </div>
+                      </div>
+
+                      {/* Slider and quick buttons */}
+                      <div className="flex flex-col sm:flex-row sm:items-center gap-3 pt-1 border-t border-slate-100">
+                        <div className="flex items-center gap-3 flex-1">
+                          <span className="text-[10px] font-bold text-slate-400">0%</span>
+                          <input
+                            type="range"
+                            min={0}
+                            max={100}
+                            step={1}
+                            value={currentValue}
+                            onChange={(e) => {
+                              const val = Number(e.target.value);
+                              setPercentageValues((prev) => ({ ...prev, [key]: val }));
+                            }}
+                            className="w-full accent-indigo-600 cursor-pointer h-2 bg-slate-200 rounded-lg"
+                          />
+                          <span className="text-[10px] font-bold text-slate-400">100%</span>
+                        </div>
+
+                        <div className="flex items-center gap-1 shrink-0">
+                          <span className="text-[10px] text-slate-400 mr-1">Cepat:</span>
+                          {quickPills[key].map((p, pIdx) => (
+                            <button
+                              key={`pill-${key}-${p}-${pIdx}`}
+                              type="button"
+                              onClick={() => setPercentageValues((prev) => ({ ...prev, [key]: p }))}
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold border transition cursor-pointer ${
+                                currentValue === p
+                                    ? 'bg-indigo-600 text-white border-indigo-600'
+                                    : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
+                              }`}
+                            >
+                              {p}%
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Target Scope Section */}
+              <div className="bg-indigo-50/60 border border-indigo-100 rounded-xl p-3.5 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-800 text-xs">
+                    <input
+                      type="checkbox"
+                      checked={applyPercentagesToAll}
+                      onChange={(e) => setApplyPercentagesToAll(e.target.checked)}
+                      className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                    />
+                    <span>Terapkan persentase ini ke seluruh indikator ({indicators.length} Indikator Aktif)</span>
+                  </label>
+                  <span className="text-[10px] font-semibold text-indigo-700">
+                    {applyPercentagesToAll ? 'Semua Indikator Terpilih' : `${selectedIndicatorIdsForPercentage.length} Indikator Terpilih`}
+                  </span>
+                </div>
+
+                {!applyPercentagesToAll && (
+                  <div className="pt-2 border-t border-indigo-100 space-y-1.5 animate-in fade-in">
+                    <div className="text-[11px] font-semibold text-slate-600">
+                      Pilih indikator yang akan diubah besaran persentasenya:
+                    </div>
+                    <div className="max-h-36 overflow-y-auto space-y-1 bg-white rounded-lg p-2 border border-slate-200">
+                      {indicators.map((ind, idx) => {
+                        const isChecked = selectedIndicatorIdsForPercentage.includes(ind.id);
+                        return (
+                          <label
+                            key={`target-ind-${ind.id}-${idx}`}
+                            className="flex items-center gap-2 text-xs text-slate-700 hover:bg-slate-50 p-1 rounded cursor-pointer"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedIndicatorIdsForPercentage((prev) => [...prev, ind.id]);
+                                } else {
+                                  setSelectedIndicatorIdsForPercentage((prev) => prev.filter((id) => id !== ind.id));
+                                }
+                              }}
+                              className="w-3.5 h-3.5 rounded text-indigo-600"
+                            />
+                            <span className="font-mono text-[10px] text-teal-800 font-bold">
+                              #{ind.nomorSOP ?? idx + 1}
+                            </span>
+                            <span className="font-medium truncate">{ind.nama}</span>
+                            <span className="text-[10px] text-slate-400 ml-auto">({ind.bobot}%)</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Live Preview Box */}
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-[11px] text-slate-600 flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <Info className="w-4 h-4 text-indigo-600 shrink-0" />
+                  <span>
+                    Simulasi: Indikator bobot <strong>20%</strong> dengan Nilai 2 ({percentageValues['2']}%) = <strong>{Math.round((20 * percentageValues['2']) / 100 * 10) / 10} poin</strong>.
+                  </span>
+                </div>
+                <div className="flex items-center gap-1 font-mono font-bold text-[10px] text-indigo-800 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">
+                  N/A:{percentageValues['N/A']}% • 0:{percentageValues['0']}% • 1:{percentageValues['1']}% • 2:{percentageValues['2']}% • 3:{percentageValues['3']}%
+                </div>
+              </div>
+
+              {/* Modal Actions */}
+              <div className="pt-3 border-t border-slate-200 flex items-center justify-end gap-2 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setIsPercentageModalOpen(false)}
+                  disabled={isSavingPercentages}
+                  className="px-4 py-2 border border-slate-300 rounded-lg text-slate-700 font-semibold hover:bg-slate-50 transition cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSavePercentageSettings}
+                  disabled={isSavingPercentages || (!applyPercentagesToAll && selectedIndicatorIdsForPercentage.length === 0)}
+                  className="px-5 py-2 bg-indigo-700 hover:bg-indigo-800 disabled:opacity-50 text-white font-bold rounded-lg shadow-xs flex items-center gap-1.5 transition cursor-pointer"
+                >
+                  {isSavingPercentages ? (
+                    <>
+                      <RotateCcw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Menyimpan ke Server...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-3.5 h-3.5" />
+                      <span>Terapkan & Simpan Persentase</span>
+                    </>
+                  )}
                 </button>
               </div>
             </div>

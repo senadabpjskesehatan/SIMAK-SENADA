@@ -304,8 +304,8 @@ export const PetugasInboxView: React.FC = () => {
                 className="text-xs bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-amber-500"
               >
                 <option value="all">Semua Anggota Tim</option>
-                {scopeAgents.map((ag) => (
-                  <option key={ag} value={ag}>
+                {scopeAgents.map((ag, idx) => (
+                  <option key={`petugas-scope-ag-${ag}-${idx}`} value={ag}>
                     {ag}
                   </option>
                 ))}
@@ -342,7 +342,7 @@ export const PetugasInboxView: React.FC = () => {
         </div>
       ) : (
         <div className="space-y-4">
-          {displayedItems.map((item) => {
+          {displayedItems.map((item, idx) => {
             const isPending = item.status === 'MENUNGGU_REVIEW_PETUGAS';
             const isRebuttal = item.status === 'PROSES_SANGGAHAN';
             const isCompleted = item.status === 'KEPUTUSAN_AKHIR' || item.status === 'SELESAI_DITERIMA';
@@ -351,7 +351,7 @@ export const PetugasInboxView: React.FC = () => {
 
             return (
               <div
-                key={item.id}
+                key={`petugas-inbox-${item.id}-${idx}`}
                 className={`bg-white rounded-xl border shadow-2xs p-5 transition space-y-4 ${
                   isPending
                     ? 'border-blue-200 hover:border-blue-300'
@@ -463,10 +463,10 @@ export const PetugasInboxView: React.FC = () => {
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                    {item.scores.map((s) => {
+                    {item.scores.map((s, sIdx) => {
                       const ind = indicators.find((i) => i.id === s.indicatorId);
                       return (
-                        <div key={s.indicatorId} className="bg-white p-2.5 rounded-md border border-slate-200 text-xs">
+                        <div key={`petugas-score-${item.id}-${s.indicatorId}-${sIdx}`} className="bg-white p-2.5 rounded-md border border-slate-200 text-xs">
                           <div className="flex items-center justify-between font-semibold text-slate-800">
                             <span className="truncate pr-2">{ind?.nama || s.indicatorId}</span>
                             <span className="font-bold text-blue-700 shrink-0">{s.score}</span>

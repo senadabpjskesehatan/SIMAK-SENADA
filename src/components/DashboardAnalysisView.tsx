@@ -250,8 +250,8 @@ export const DashboardAnalysisView: React.FC = () => {
               className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500"
             >
               <option value="all">Semua Periode Bulan</option>
-              {periodList.map((p) => (
-                <option key={p} value={p}>
+              {periodList.map((p, idx) => (
+                <option key={`anal-p-${p}-${idx}`} value={p}>
                   Bulan {p}
                 </option>
               ))}
@@ -273,8 +273,8 @@ export const DashboardAnalysisView: React.FC = () => {
               }`}
             >
               <option value="all">Semua Tim (1 - 6)</option>
-              {teamList.map((t) => (
-                <option key={t} value={t}>
+              {teamList.map((t, idx) => (
+                <option key={`anal-t-${t}-${idx}`} value={t}>
                   TIM {t}
                 </option>
               ))}
@@ -291,8 +291,8 @@ export const DashboardAnalysisView: React.FC = () => {
               className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500"
             >
               <option value="all">Semua Kategori</option>
-              {categoryList.map((c) => (
-                <option key={c} value={c}>
+              {categoryList.map((c, idx) => (
+                <option key={`anal-c-${c}-${idx}`} value={c}>
                   {c}
                 </option>
               ))}
@@ -314,8 +314,8 @@ export const DashboardAnalysisView: React.FC = () => {
               }`}
             >
               <option value="all">{isPetugas ? currentUser?.name : 'Semua Petugas'}</option>
-              {agentList.map((a) => (
-                <option key={a} value={a}>
+              {agentList.map((a, idx) => (
+                <option key={`anal-a-${a}-${idx}`} value={a}>
                   {a}
                 </option>
               ))}
@@ -378,8 +378,8 @@ export const DashboardAnalysisView: React.FC = () => {
           </div>
 
           <div className="space-y-3 flex-grow overflow-y-auto max-h-[400px]">
-            {indicatorAnalysis.map((ind) => (
-              <div key={ind.indicatorId} className="p-3 bg-slate-50 rounded-lg border border-slate-200">
+            {indicatorAnalysis.map((ind, idx) => (
+              <div key={`anal-ind-${ind.indicatorId}-${idx}`} className="p-3 bg-slate-50 rounded-lg border border-slate-200">
                 <div className="flex items-center justify-between text-xs mb-1.5">
                   <span className="font-bold text-slate-800">{ind.name}</span>
                   <span className={`font-bold px-2 py-0.5 rounded text-[11px] ${
@@ -425,8 +425,8 @@ export const DashboardAnalysisView: React.FC = () => {
           </div>
 
           <div className="space-y-3 flex-grow overflow-y-auto max-h-[400px]">
-            {topicAnalysis.map((top) => (
-              <div key={top.topic} className="p-3 bg-slate-50 rounded-lg border border-slate-200">
+            {topicAnalysis.map((top, idx) => (
+              <div key={`topic-${top.topic || 'unknown'}-${idx}`} className="p-3 bg-slate-50 rounded-lg border border-slate-200">
                 <div className="flex items-center justify-between text-xs mb-1">
                   <span className="font-bold text-slate-800 line-clamp-1">{top.topic}</span>
                   <span className="text-[11px] font-bold text-slate-600">{top.count} Kasus</span>
@@ -460,8 +460,8 @@ export const DashboardAnalysisView: React.FC = () => {
           </div>
 
           <div className="space-y-3 flex-grow overflow-y-auto max-h-[400px]">
-            {agentAnalysis.map((ag) => (
-              <div key={ag.agent} className="p-3 bg-slate-50 rounded-lg border border-slate-200">
+            {agentAnalysis.map((ag, idx) => (
+              <div key={`agent-${ag.agent || 'unknown'}-${idx}`} className="p-3 bg-slate-50 rounded-lg border border-slate-200">
                 <div className="flex items-center justify-between text-xs mb-1">
                   <span className="font-bold text-slate-800">{ag.agent}</span>
                   <span className="text-[10px] bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded">

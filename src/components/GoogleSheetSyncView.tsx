@@ -698,8 +698,8 @@ export const GoogleSheetSyncView: React.FC = () => {
               className="px-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium text-slate-700"
             >
               <option value="all">Semua Kategori ({tickets.length})</option>
-              {statistics.categories.map((cat) => (
-                <option key={cat} value={cat}>
+              {statistics.categories.map((cat, idx) => (
+                <option key={`sync-cat-${cat}-${idx}`} value={cat}>
                   {cat} ({statistics.catCounts[cat] || 0})
                 </option>
               ))}
@@ -771,8 +771,8 @@ export const GoogleSheetSyncView: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {paginatedTickets.map((t) => (
-                    <tr key={t.nomorTiket} className="hover:bg-slate-50/80 transition">
+                  {paginatedTickets.map((t, idx) => (
+                    <tr key={`sync-tkt-${t.nomorTiket || 'row'}-${idx}`} className="hover:bg-slate-50/80 transition">
                       <td className="py-2.5 px-3.5 font-mono font-semibold text-slate-900 whitespace-nowrap">
                         {t.nomorTiket}
                       </td>

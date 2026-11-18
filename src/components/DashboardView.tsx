@@ -303,8 +303,8 @@ export const DashboardView: React.FC = () => {
                 className="text-xs font-medium bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500 max-w-[180px]"
               >
                 <option value="all">Semua Petugas ({agentList.length})</option>
-                {agentList.map((agent) => (
-                  <option key={agent} value={agent}>
+                {agentList.map((agent, idx) => (
+                  <option key={`dash-ag-${agent}-${idx}`} value={agent}>
                     {agent}
                   </option>
                 ))}
@@ -409,8 +409,8 @@ export const DashboardView: React.FC = () => {
               <div className="mt-2 flex flex-wrap gap-1 text-[10px]">
                 {categoryStats.list
                   .filter((c) => !['Informasi', 'Permintaan', 'Pengaduan'].includes(c))
-                  .map((c) => (
-                    <span key={c} className="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded font-medium">
+                  .map((c, idx) => (
+                    <span key={`cat-extra-${c}-${idx}`} className="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded font-medium">
                       {c}: {categoryStats.counts[c]}
                     </span>
                   ))}
@@ -494,7 +494,7 @@ export const DashboardView: React.FC = () => {
                   agentPerformance.map((agent, idx) => {
                     const agentPred = getScorePredicate(agent.averageScore);
                     return (
-                      <tr key={agent.name} className="hover:bg-slate-50 transition">
+                      <tr key={`agent-perf-${agent.name || 'unnamed'}-${idx}`} className="hover:bg-slate-50 transition">
                         <td className="py-3 px-3">
                           <div className="flex items-center gap-2">
                             <span className="w-5 h-5 rounded-full bg-slate-100 text-slate-600 font-bold text-[10px] flex items-center justify-center">
@@ -568,8 +568,8 @@ export const DashboardView: React.FC = () => {
             </div>
 
             <div className="space-y-4">
-              {indicatorStats.map((ind) => (
-                <div key={ind.id} className="space-y-1">
+              {indicatorStats.map((ind, idx) => (
+                <div key={`dash-ind-${ind.id}-${idx}`} className="space-y-1">
                   <div className="flex items-center justify-between text-xs">
                     <span className="font-medium text-slate-700 truncate max-w-[200px]" title={ind.nama}>
                       {ind.nama}

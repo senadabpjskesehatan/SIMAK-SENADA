@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { Ticket, IndicatorScore } from '../types';
-import { DEFAULT_NILAI_OPTIONS } from '../data/mockData';
+import { DEFAULT_NILAI_OPTIONS, getOptionPercentage } from '../data/mockData';
 import { cleanCategory } from '../utils/csvParser';
 import {
   Scale,
@@ -318,13 +318,7 @@ export const SamplingView: React.FC = () => {
       const defaultOpt = pilihan[pilihan.length - 1] || pilihan[0] || { nilai: '3' };
       initialNilaiMap[ind.id] = defaultOpt.nilai;
 
-      let numScore = 100;
-      if (defaultOpt.nilai === '0') numScore = 0;
-      else if (defaultOpt.nilai === '1') numScore = 50;
-      else if (defaultOpt.nilai === '2') numScore = 75;
-      else if (defaultOpt.nilai === '3') numScore = 100;
-      else if (defaultOpt.nilai === 'N/A') numScore = 100;
-
+      const numScore = getOptionPercentage(defaultOpt);
       initialScores[ind.id] = numScore;
       initialNotes[ind.id] = '';
     });
@@ -502,8 +496,8 @@ export const SamplingView: React.FC = () => {
               className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500 font-medium text-slate-800 transition"
             >
               <option value="all">Semua Petugas ({agentOptions.length})</option>
-              {agentOptions.map((opt) => (
-                <option key={opt.value} value={opt.value}>
+              {agentOptions.map((opt, idx) => (
+                <option key={`agent-opt-${opt.value}-${idx}`} value={opt.value}>
                   {opt.label}
                 </option>
               ))}
@@ -532,8 +526,8 @@ export const SamplingView: React.FC = () => {
               className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500 font-medium text-slate-800 transition"
             >
               <option value="all">Semua Kategori ({categoryOptions.length})</option>
-              {categoryOptions.map((opt) => (
-                <option key={opt.value} value={opt.value}>
+              {categoryOptions.map((opt, idx) => (
+                <option key={`cat-opt-${opt.value}-${idx}`} value={opt.value}>
                   {opt.label}
                 </option>
               ))}
@@ -562,8 +556,8 @@ export const SamplingView: React.FC = () => {
               className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500 font-medium text-slate-800 transition"
             >
               <option value="all">Semua Pokok Masalah ({pokokMasalahOptions.length})</option>
-              {pokokMasalahOptions.map((opt) => (
-                <option key={opt.value} value={opt.value}>
+              {pokokMasalahOptions.map((opt, idx) => (
+                <option key={`pokok-opt-${opt.value}-${idx}`} value={opt.value}>
                   {opt.label}
                 </option>
               ))}
@@ -592,8 +586,8 @@ export const SamplingView: React.FC = () => {
               className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500 font-medium text-slate-800 transition"
             >
               <option value="all">Semua Topik Masalah ({topikMasalahOptions.length})</option>
-              {topikMasalahOptions.map((opt) => (
-                <option key={opt.value} value={opt.value}>
+              {topikMasalahOptions.map((opt, idx) => (
+                <option key={`topik-opt-${opt.value}-${idx}`} value={opt.value}>
                   {opt.label}
                 </option>
               ))}
@@ -720,8 +714,8 @@ export const SamplingView: React.FC = () => {
                   </td>
                 </tr>
               ) : (
-                displayedTickets.map((ticket) => (
-                  <tr key={ticket.nomorTiket} className="hover:bg-slate-50/80 transition">
+                displayedTickets.map((ticket, idx) => (
+                  <tr key={`sampling-tkt-${ticket.nomorTiket || 'row'}-${idx}`} className="hover:bg-slate-50/80 transition">
                     <td className="py-3.5 px-4 whitespace-nowrap">
                       <div className="font-bold text-slate-900 font-mono text-[11px]">
                         {ticket.nomorTiket}
@@ -779,7 +773,7 @@ export const SamplingView: React.FC = () => {
                       <div className="flex items-center gap-1 mt-1 text-amber-500">
                         {Array.from({ length: 5 }).map((_, i) => (
                           <Star
-                            key={i}
+                            key={`star-${ticket.nomorTiket || 'tkt'}-${idx}-${i}`}
                             className={`w-3 h-3 ${
                               i < ticket.rating ? 'fill-amber-400 text-amber-400' : 'text-slate-200'
                             }`}
@@ -1001,6 +995,21 @@ export const SamplingView: React.FC = () => {
                 </div>
               )}
 
+              {/* Catatan Umum Asesor Quality Assurance (Dipindahkan ke atas sebelum poin penilaian) */}
+              <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+                <label className="block text-xs font-bold text-slate-800 mb-1.5 flex items-center justify-between">
+                  <span>Catatan Umum Asesor Quality Assurance</span>
+                  <span className="text-[11px] font-normal text-slate-400">Umpan balik menyeluruh untuk petugas</span>
+                </label>
+                <textarea
+                  rows={2}
+                  value={qaGeneralNote}
+                  onChange={(e) => setQaGeneralNote(e.target.value)}
+                  placeholder="Berikan umpan balik menyeluruh atau arahan perbaikan untuk petugas..."
+                  className="w-full p-2.5 text-xs rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
+                />
+              </div>
+
               {/* Indikator Penilaian Sliders & Inputs */}
               <div>
                 <div className="flex items-center justify-between mb-3">
@@ -1051,24 +1060,20 @@ export const SamplingView: React.FC = () => {
                               onChange={(e) => {
                                 const val = e.target.value;
                                 setSelectedNilaiMap((prev) => ({ ...prev, [ind.id]: val }));
-                                let numScore = 100;
-                                if (val === '0') numScore = 0;
-                                else if (val === '1') numScore = 50;
-                                else if (val === '2') numScore = 75;
-                                else if (val === '3') numScore = 100;
-                                else if (val === 'N/A') numScore = 100;
+                                const chosenOpt = pilihanNilai.find((p) => p.nilai === val);
+                                const numScore = getOptionPercentage(chosenOpt);
                                 setScores((prev) => ({ ...prev, [ind.id]: numScore }));
                               }}
                               className="px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-teal-500"
                             >
-                              {pilihanNilai.map((opt) => (
-                                <option key={opt.nilai} value={opt.nilai}>
-                                  Nilai {opt.nilai} - {opt.label}
+                              {pilihanNilai.map((opt, oIdx) => (
+                                <option key={`scoring-opt-${ind.id}-${opt.nilai}-${oIdx}`} value={opt.nilai}>
+                                  Nilai {opt.nilai} - {opt.label} ({getOptionPercentage(opt)}%)
                                 </option>
                               ))}
                             </select>
                             <span className="bg-teal-700 text-white font-extrabold text-xs px-2.5 py-1.5 rounded-lg shadow-2xs">
-                              {currentScore} Poin
+                              {currentScore}%
                             </span>
                           </div>
                         </div>
@@ -1078,38 +1083,10 @@ export const SamplingView: React.FC = () => {
                             <span className="font-bold text-teal-800">Referensi Nilai {currentNilai}:</span> {selectedOptObj.referensiKetentuan}
                           </div>
                         )}
-
-                        {/* Note per indicator */}
-                        <div className="pl-7">
-                          <input
-                            type="text"
-                            value={indicatorNotes[ind.id] || ''}
-                            onChange={(e) => {
-                              const text = e.target.value;
-                              setIndicatorNotes((prev) => ({ ...prev, [ind.id]: text }));
-                            }}
-                            placeholder={`Catatan penilai untuk indikator ${ind.nama}...`}
-                            className="w-full px-3 py-1.5 text-[11px] rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-teal-500"
-                          />
-                        </div>
                       </div>
                     );
                   })}
                 </div>
-              </div>
-
-              {/* General QA Review Note */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Catatan Umum Asesor Quality Assurance
-                </label>
-                <textarea
-                  rows={2}
-                  value={qaGeneralNote}
-                  onChange={(e) => setQaGeneralNote(e.target.value)}
-                  placeholder="Berikan umpan balik menyeluruh atau arahan perbaikan untuk petugas..."
-                  className="w-full p-3 text-xs rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
-                />
               </div>
             </div>
 
